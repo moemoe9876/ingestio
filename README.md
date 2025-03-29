@@ -1,66 +1,79 @@
-# Mckay's App Template
+# PDF to Structured Data with Next.js and Gemini 2.0
 
-This is a full-stack app template for courses on [Takeoff](https://JoinTakeoff.com/).
+This project demonstrates how to extract structured data from PDFs using Google's Gemini 2.0 AI model in a Next.js web application. It allows users to upload PDFs and dynamically generate JSON schemas based on user prompts, which are then used to extract structured information from the documents.
 
-## Sponsors
+**How It Works:**
 
-If you are interested in sponsoring my repos, please contact me at [ads@takeoffai.org](mailto:ads@takeoffai.org).
+1. **Upload PDF**: Users can upload their images / PDF documents through the web interface
+2. **Define Schema**: Users provide a natural language prompt describing the data they want to extract
+3. **Schema Generation**: Gemini 2.0 generates a JSON schema based on the user's prompt
+4. **Data Extraction**: The Schema is used to extract structured data from the PDF using structured output from Gemini 2.0
+5. **Results**: Extracted data is presented in a clean, organized format
 
-Or sponsor me directly on [GitHub Sponsors](https://github.com/sponsors/mckaywrigley).
+## Features
 
-## Tech Stack
+- 📄 PDF file upload and preview
+- 🤖 Dynamic JSON schema generation using Gemini 2.0
+- 🔍 Structured Outputs using Gemini 2.0
+- ⚡  Next.js frontend with shadcn/ui
+- 🎨 Uses Gemini 2.0 Javascript SDK
 
-- IDE: [Cursor](https://www.cursor.com/)
-- AI Tools: [V0](https://v0.dev/), [Perplexity](https://www.perplexity.com/)
-- Frontend: [Next.js](https://nextjs.org/docs), [Tailwind](https://tailwindcss.com/docs/guides/nextjs), [Shadcn](https://ui.shadcn.com/docs/installation), [Framer Motion](https://www.framer.com/motion/introduction/)
-- Backend: [PostgreSQL](https://www.postgresql.org/about/), [Supabase](https://supabase.com/), [Drizzle](https://orm.drizzle.team/docs/get-started-postgresql), [Server Actions](https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations)
-- Auth: [Clerk](https://clerk.com/)
-- Payments: [Stripe](https://stripe.com/)
-- Analytics: [PostHog](https://posthog.com/)
+## Getting Started
 
-## Prerequisites
+### Local Development
 
-You will need accounts for the following services.
-
-They all have free plans that you can use to get started.
-
-- Create a [Cursor](https://www.cursor.com/) account
-- Create a [GitHub](https://github.com/) account
-- Create a [Supabase](https://supabase.com/) account
-- Create a [Clerk](https://clerk.com/) account
-- Create a [Stripe](https://stripe.com/) account
-- Create a [PostHog](https://posthog.com/) account
-- Create a [Vercel](https://vercel.com/) account
-
-You will likely not need paid plans unless you are building a business.
-
-## Environment Variables
+First, set up your environment variables:
 
 ```bash
-# DB (Supabase)
-DATABASE_URL=
-
-# Auth (Clerk)
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/login
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/signup
-
-# Payments (Stripe)
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-NEXT_PUBLIC_STRIPE_PORTAL_LINK=
-NEXT_PUBLIC_STRIPE_PAYMENT_LINK_YEARLY=
-NEXT_PUBLIC_STRIPE_PAYMENT_LINK_MONTHLY=
-
-# Analytics (PostHog)
-NEXT_PUBLIC_POSTHOG_KEY=
-NEXT_PUBLIC_POSTHOG_HOST=
+cp .env.example .env
 ```
 
-## Setup
+Add your Google AI Studio API key to the `.env` file:
 
-1. Clone the repository
-2. Copy `.env.example` to `.env.local` and fill in the environment variables from above
-3. Run `npm install` to install dependencies
-4. Run `npm run dev` to run the app locally
+```
+GEMINI_API_KEY=your_google_api_key
+```
+
+Then, install dependencies and run the development server:
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the application.
+
+### Docker Deployment
+
+1. Build the Docker image:
+
+```bash
+docker build -t pdf-structured-data .
+```
+
+2. Run the container with your Google API key:
+
+```bash
+docker run -p 3000:3000 -e GEMINI_API_KEY=your_google_api_key pdf-structured-data
+```
+
+Or using an environment file:
+
+```bash
+# Run container with env file
+docker run -p 3000:3000 --env-file .env pdf-structured-data
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the application.
+
+## Technologies Used
+
+- [Next.js](https://nextjs.org/) - React framework for the web application
+- [Google Gemini 2.0](https://deepmind.google/technologies/gemini/) - AI model for schema generation and data extraction
+- [shadcn/ui](https://ui.shadcn.com/) - Re-usable components built using Radix UI and Tailwind CSS 
+
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](./LICENSE) file for details.
+

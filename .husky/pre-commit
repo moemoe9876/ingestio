@@ -2,4 +2,8 @@
 
 . "$(dirname -- "$0")/_/husky.sh"
 
-npm run lint:fix && npm run format:write && git add .
+# Run ESLint, Prettier, and TypeScript checks
+npm run lint:fix && npm run format:write && npm run type-check && git add .
+
+# Alternative using Biome (uncomment to use Biome instead)
+# npm run biome:format && npm run type-check && git add .

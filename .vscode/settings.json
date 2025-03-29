@@ -1,0 +1,66 @@
+{
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit",
+        "source.organizeImports": "explicit"
+    },
+    // Configure which formatter to use for different languages
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[javascriptreact]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[typescriptreact]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    // Uncomment below to use Biome instead of Prettier
+    // "[javascript]": {
+    //   "editor.defaultFormatter": "biomejs.biome"
+    // },
+    // "[javascriptreact]": {
+    //   "editor.defaultFormatter": "biomejs.biome"
+    // },
+    // "[typescript]": { 
+    //   "editor.defaultFormatter": "biomejs.biome"
+    // },
+    // "[typescriptreact]": {
+    //   "editor.defaultFormatter": "biomejs.biome"
+    // },
+    // "[json]": {
+    //   "editor.defaultFormatter": "biomejs.biome"
+    // },
+    // Eslint configuration
+    "eslint.validate": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+    ],
+    // Prettier configuration
+    "prettier.requireConfig": true,
+    // Biome configuration
+    "biome.lspBin": "node_modules/.bin/biome",
+    "biome.enabled": true,
+    // Tailwind CSS configuration
+    "tailwindCSS.includeLanguages": {
+        "typescript": "javascript",
+        "typescriptreact": "javascript"
+    },
+    "tailwindCSS.experimental.classRegex": [
+        [
+            "cva\\(([^)]*)\\)",
+            "[\"'`]([^\"'`]*).*?[\"'`]"
+        ],
+        [
+            "cx\\(([^)]*)\\)",
+            "(?:'|\"|`)([^']*)(?:'|\"|`)"
+        ]
+    ]
+}

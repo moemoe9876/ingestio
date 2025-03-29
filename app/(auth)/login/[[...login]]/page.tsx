@@ -15,8 +15,19 @@ export default function LoginPage() {
 
   return (
     <SignIn
-      forceRedirectUrl="/todo"
-      appearance={{ baseTheme: theme === "dark" ? dark : undefined }}
+      forceRedirectUrl="/dashboard"
+      appearance={{
+        baseTheme: theme === "dark" ? dark : undefined,
+        elements: {
+          formButtonPrimary: 'bg-primary hover:bg-primary/90 text-primary-foreground',
+          card: 'shadow-md rounded-lg border border-border',
+          headerTitle: 'text-foreground',
+          headerSubtitle: 'text-muted-foreground',
+          formFieldLabel: 'text-foreground',
+          formFieldInput: 'bg-background border border-input rounded-md',
+          footerActionLink: 'text-primary hover:text-primary/90'
+        }
+      }}
     />
   )
 }

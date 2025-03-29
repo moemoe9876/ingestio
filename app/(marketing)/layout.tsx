@@ -1,12 +1,6 @@
-/*
-<ai_context>
-This server layout provides a shared header and basic structure for (marketing) routes.
-</ai_context>
-*/
-
 "use server"
 
-import Header from "@/components/header"
+import { SiteHeader } from "@/components/utilities/site-header"
 
 export default async function MarketingLayout({
   children
@@ -14,10 +8,16 @@ export default async function MarketingLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-
-      <div className="flex-1">{children}</div>
+    <div className="marketing-scope flex min-h-screen flex-col">
+      <SiteHeader />
+      <main className="flex-1">{children}</main>
+      <footer className="py-6 md:px-8 md:py-0">
+        <div className="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
+          <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
+            © {new Date().getFullYear()} App Template. All rights reserved.
+          </p>
+        </div>
+      </footer>
     </div>
   )
-}
+} 

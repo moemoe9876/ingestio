@@ -1,22 +1,31 @@
-/*
-<ai_context>
-This client component provides the providers for the app.
-</ai_context>
-*/
+"use client";
 
-"use client"
+import { ReactNode } from "react";
+import { ThemeProvider } from "./theme-provider";
 
-import { TooltipProvider } from "@/components/ui/tooltip"
-import { ThemeProvider as NextThemesProvider } from "next-themes"
-import { ThemeProviderProps } from "next-themes/dist/types"
-import { CSPostHogProvider } from "./posthog/posthog-provider"
+interface ProvidersProps {
+  children: ReactNode;
+  attribute?: string;
+  defaultTheme?: string;
+  enableSystem?: boolean;
+  disableTransitionOnChange?: boolean;
+}
 
-export const Providers = ({ children, ...props }: ThemeProviderProps) => {
+export function Providers({
+  children,
+  attribute = "class",
+  defaultTheme = "system",
+  enableSystem = true,
+  disableTransitionOnChange = false
+}: ProvidersProps) {
   return (
-    <NextThemesProvider {...props}>
-      <TooltipProvider>
-        <CSPostHogProvider>{children}</CSPostHogProvider>
-      </TooltipProvider>
-    </NextThemesProvider>
-  )
+    <ThemeProvider
+      attribute={attribute}
+      defaultTheme={defaultTheme}
+      enableSystem={enableSystem}
+      disableTransitionOnChange={disableTransitionOnChange}
+    >
+      {children}
+    </ThemeProvider>
+  );
 }
