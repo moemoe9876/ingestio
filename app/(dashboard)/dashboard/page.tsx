@@ -1,16 +1,18 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { BarChart3, FileText, FileUp, History } from "lucide-react";
-import Link from "next/link";
+import { useUser } from "@clerk/nextjs";
 
 export default function DashboardPage() {
+  const { user } = useUser();
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+        <h2 className="text-3xl font-bold tracking-tight">
+          Welcome, {user?.firstName || "User"}
+        </h2>
       </div>
       
       <Tabs defaultValue="overview" className="space-y-4">

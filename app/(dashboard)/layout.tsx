@@ -12,9 +12,15 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { userId } = auth();
+  // Get the auth state - check if user is authenticated
+  const authState = await auth();
+  const { userId } = authState;
   
+  console.log("Dashboard Layout - Auth Check:", { userId });
+  
+  // Redirect to login if not authenticated
   if (!userId) {
+    console.log("Dashboard Layout - Redirecting to login");
     redirect("/login");
   }
   

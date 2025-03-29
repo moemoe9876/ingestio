@@ -1,4 +1,4 @@
-// components/dashboard/user-nav.tsx
+// components/utilities/user-nav.tsx
 "use client";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -13,14 +13,14 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { useAuth as useClerkAuth, useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { Loader2, LogOut, Settings, User as UserIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export function UserNav() {
   const { user, isLoaded } = useUser();
-  const { signOut } = useClerkAuth();
+  const { signOut } = useAuth();
   const router = useRouter();
 
   const handleSignOut = async () => {

@@ -1,4 +1,4 @@
-// components/dashboard/app-sidebar.tsx
+// components/utilities/app-sidebar.tsx
 "use client"
 
 import {
@@ -43,7 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
-import { useAuth as useClerkAuth, useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { useTheme } from "next-themes";
 
 const navMain = [
@@ -85,10 +85,10 @@ const navSecondary = [
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const router = useRouter();
-  const { resolvedTheme, setTheme } = useTheme();
+  const { setTheme, theme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
   const { user, isLoaded } = useUser();
-  const { signOut } = useClerkAuth();
+  const { signOut } = useAuth();
 
   React.useEffect(() => {
     setMounted(true);
@@ -100,10 +100,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   };
 
   const getInitials = (name: string | null | undefined) => {
-    if (!name) return "?";
-    const names = name.split(' ');
-    if (names.length === 1) return names[0][0].toUpperCase();
-    return (names[0][0] + names[names.length - 1][0]).toUpperCase();
+    if (!name) return "";
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase();
   };
 
   return (
@@ -195,15 +197,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <SidebarMenuButton asChild className="w-full justify-start rounded-md py-3 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors">
                   <label className="flex w-full cursor-pointer items-center justify-between">
                     <div className="flex items-center gap-2">
-                      {resolvedTheme === 'dark' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+                      {theme === 'dark' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
                       <span>Dark Mode</span>
                     </div>
                     {mounted ? (
                       <Switch
                         className="ml-auto"
-                        checked={resolvedTheme === "dark"}
+                        checked={theme === "dark"}
                         onCheckedChange={() =>
-                          setTheme(resolvedTheme === "dark" ? "light" : "dark")
+                          setTheme(theme === "dark" ? "light" : "dark")
                         }
                         aria-label="Toggle dark mode"
                       />
@@ -226,13 +228,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <button className="flex items-center justify-between w-full p-3 rounded-md hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-muted transition-colors duration-200">
                   <div className="flex items-center gap-2">
                     <Avatar className="h-9 w-9 rounded-full">
-                      <AvatarImage src={user?.photoURL || undefined} alt={user?.displayName || "User"} />
-                      <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground">{getInitials(user?.displayName)}</AvatarFallback>
+                      <AvatarImage src={user?.imageUrl || undefined} alt={user?.fullName || "User"} />
+                      <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground">{getInitials(user?.fullName)}</AvatarFallback>
                     </Avatar>
                     <div className="grid flex-1 text-left text-sm leading-tight group-data-[state=collapsed]:hidden">
-                      <span className="truncate font-medium">{user?.displayName || "User"}</span>
+                      <span className="truncate font-medium">{user?.fullName || "User"}</span>
                       <span className="truncate text-xs text-sidebar-muted-foreground">
-                        {user?.email || "No email"}
+                        {user?.primaryEmailAddress?.emailAddress || "No email"}
                       </span>
                     </div>
                   </div>
@@ -246,9 +248,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               >
                 <DropdownMenuLabel className="font-normal px-2 py-1.5">
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">{user?.displayName || "User"}</p>
+                    <p className="text-sm font-medium leading-none">{user?.fullName || "User"}</p>
                     <p className="text-xs leading-none text-gray-400">
-                      {user?.email || "No email"}
+                      {user?.primaryEmailAddress?.emailAddress || "No email"}
                     </p>
                   </div>
                 </DropdownMenuLabel>

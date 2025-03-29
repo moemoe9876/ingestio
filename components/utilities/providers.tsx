@@ -1,5 +1,6 @@
 "use client";
 
+import { ClerkProvider } from "@clerk/nextjs";
 import { ReactNode } from "react";
 import { ThemeProvider } from "./theme-provider";
 
@@ -19,13 +20,15 @@ export function Providers({
   disableTransitionOnChange = false
 }: ProvidersProps) {
   return (
-    <ThemeProvider
-      attribute={attribute}
-      defaultTheme={defaultTheme}
-      enableSystem={enableSystem}
-      disableTransitionOnChange={disableTransitionOnChange}
-    >
-      {children}
-    </ThemeProvider>
+    <ClerkProvider>
+      <ThemeProvider
+        attribute={attribute}
+        defaultTheme={defaultTheme}
+        enableSystem={enableSystem}
+        disableTransitionOnChange={disableTransitionOnChange}
+      >
+        {children}
+      </ThemeProvider>
+    </ClerkProvider>
   );
 }

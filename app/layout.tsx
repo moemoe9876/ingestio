@@ -12,7 +12,6 @@ import { Providers } from "@/components/utilities/providers"
 import { TailwindIndicator } from "@/components/utilities/tailwind-indicator"
 import { UserInitializer } from "@/components/utilities/user-initializer"
 import { cn } from "@/lib/utils"
-import { ClerkProvider } from "@clerk/nextjs"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
@@ -40,26 +39,24 @@ export default async function RootLayout({
           inter.className
         )}
       >
-        <ClerkProvider>
-          <UserInitializer />
-          <PostHogProvider>
-            <Providers
-              attribute="class"
-              defaultTheme="dark"
-              enableSystem={false}
-              disableTransitionOnChange
-            >
-              <PostHogUserIdentify />
-              <PostHogPageview />
+        <PostHogProvider>
+          <Providers
+            attribute="class"
+            defaultTheme="dark"
+            enableSystem={false}
+            disableTransitionOnChange
+          >
+            <UserInitializer />
+            <PostHogUserIdentify />
+            <PostHogPageview />
 
-              {children}
+            {children}
 
-              <TailwindIndicator />
+            <TailwindIndicator />
 
-              <Toaster />
-            </Providers>
-          </PostHogProvider>
-        </ClerkProvider>
+            <Toaster />
+          </Providers>
+        </PostHogProvider>
       </body>
     </html>
   )
