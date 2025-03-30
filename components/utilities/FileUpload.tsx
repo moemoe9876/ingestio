@@ -2,11 +2,11 @@
 
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Button } from "./ui/button";
+import { Button } from "@/components/ui/button";
 import { Upload as UploadIcon, File as FileIcon, X } from "lucide-react";
-import PdfViewer from "./PdfViewer";
-import { Textarea } from "./ui/textarea";
-import { Label } from "./ui/label";
+import PdfViewer from "@/components/utilities/PdfViewer";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 interface FileUploadProps {

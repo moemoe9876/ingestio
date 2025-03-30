@@ -25,8 +25,8 @@ export function SiteHeader({ className, ...props }: SiteHeaderProps) {
       }
       return path[1].charAt(0).toUpperCase() + path[1].slice(1).replace(/-/g, " ")
     }
-    return ""
   }
+
 
   return (
     <header 

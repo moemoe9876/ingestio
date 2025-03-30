@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { FileUpload } from "@/components/FileUpload";
+import { FileUpload } from "@/components/utilities/FileUpload";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { FileIcon, FileText, Upload, AlertCircle, CheckCircle2, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
