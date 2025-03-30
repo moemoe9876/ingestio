@@ -19,8 +19,8 @@ import "./globals.css"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Mckay's App Template",
-  description: "A full-stack web app template."
+  title: "Ingestio.io | AI-Powered Document Processing",
+  description: "Extract data from documents in seconds with our AI-powered platform. Process invoices, receipts, and more with 99% accuracy."
 }
 
 export default async function RootLayout({

@@ -1,5 +1,6 @@
 "use client"
 
+import { Header } from "@/components/layout/header"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -7,37 +8,29 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { UserNav } from "@/components/utilities/user-nav"
 import { useAuth as useClerkAuth, useUser } from "@clerk/nextjs"
-import { AnimatePresence, motion } from "framer-motion"
+import { motion } from "framer-motion"
 import {
-    ArrowDown,
-    ArrowRight,
-    ArrowUpRight,
-    BarChart,
-    CheckCircle2,
-    ChevronRight,
-    Code,
-    Database,
-    FileText,
-    Globe,
-    Layers,
-    Loader2,
-    Lock,
-    Menu,
-    Moon,
-    Settings,
-    Shield,
-    Sparkles,
-    Star,
-    Sun,
-    Users,
-    Workflow,
-    X,
-    Zap
+  ArrowDown,
+  ArrowRight,
+  ArrowUpRight,
+  BarChart,
+  CheckCircle2,
+  ChevronRight,
+  Code,
+  Database,
+  FileText,
+  Globe,
+  Layers,
+  Lock,
+  Settings,
+  Shield,
+  Sparkles,
+  Star,
+  Users,
+  Workflow,
+  Zap
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
@@ -105,175 +98,7 @@ export default function LandingPage() {
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-background to-background/80 selection:bg-primary/20 selection:text-primary">
       {/* Header */}
-      <header
-        className={`sticky top-0 z-50 w-full border-b transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-border/40" : "bg-transparent border-transparent"}`}
-      >
-        <div className="container flex h-16 items-center justify-between py-4">
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            className="flex items-center gap-2"
-          >
-            <div className="bg-primary p-1.5 rounded-lg relative overflow-hidden group">
-              <div className="absolute inset-0 bg-white/20 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
-              <FileText className="h-5 w-5 text-primary-foreground relative z-10" />
-            </div>
-            <span className="font-bold text-xl">
-              Ingestio<span className="text-primary">.io</span>
-            </span>
-          </motion.div>
-
-          {/* Mobile menu button */}
-          <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="md:hidden"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            whileTap={{ scale: 0.95 }}
-          >
-            {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </motion.button>
-
-          {/* Desktop navigation */}
-          <nav className="hidden md:flex gap-8">
-            {[
-              { href: "#features", label: "Features", id: "features" },
-              { href: "#how-it-works", label: "How It Works", id: "how-it-works" },
-              { href: "#testimonials", label: "Testimonials", id: "testimonials" },
-              { href: "#pricing", label: "Pricing", id: "pricing" },
-            ].map((item) => (
-              <Link
-                key={item.id}
-                href={item.href}
-                className={`text-sm font-medium transition-colors hover:text-primary relative ${activeSection === item.id ? "text-primary" : "text-muted-foreground"}`}
-              >
-                {item.label}
-                {activeSection === item.id && (
-                  <motion.div
-                    layoutId="activeSection"
-                    className="absolute -bottom-1 left-0 right-0 h-0.5 bg-primary rounded-full"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
-              </Link>
-            ))}
-          </nav>
-
-          {/* Desktop CTA buttons */}
-          <div className="hidden md:flex items-center gap-4">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Switch
-                    checked={theme === "dark"}
-                    onCheckedChange={() => setTheme(theme === "dark" ? "light" : "dark")}
-                    className="mr-2"
-                  />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Toggle {theme === "dark" ? "light" : "dark"} mode</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            {loading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : user ? (
-              <>
-                <Button variant="ghost" asChild>
-                  <Link href="/dashboard">Dashboard</Link>
-                </Button>
-                <UserNav />
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/login"
-                  className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
-                >
-                  Log in
-                </Link>
-                <Button asChild className="relative overflow-hidden group">
-                  <Link href="/signup">
-                    <span className="relative z-10">Get Started</span>
-                    <span className="absolute inset-0 bg-white/20 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
-                  </Link>
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Mobile menu */}
-        <AnimatePresence>
-          {isMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.3 }}
-              className="md:hidden border-t bg-background overflow-hidden"
-            >
-              <div className="container py-4 flex flex-col gap-4">
-                {[
-                  { href: "#features", label: "Features" },
-                  { href: "#how-it-works", label: "How It Works" },
-                  { href: "#testimonials", label: "Testimonials" },
-                  { href: "#pricing", label: "Pricing" },
-                ].map((item, index) => (
-                  <motion.div
-                    key={item.href}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <Link
-                      href={item.href}
-                      className="text-sm font-medium py-2 hover:text-primary block"
-                      onClick={() => setIsMenuOpen(false)}
-                    >
-                      {item.label}
-                    </Link>
-                  </motion.div>
-                ))}
-                <div className="flex items-center justify-between pt-2 border-t">
-                  <div className="flex items-center gap-2">
-                    <Sun className="h-4 w-4" />
-                    <Switch
-                      checked={theme === "dark"}
-                      onCheckedChange={() => setTheme(theme === "dark" ? "light" : "dark")}
-                    />
-                    <Moon className="h-4 w-4" />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2 pt-2 border-t">
-                  {loading ? (
-                    <div className="flex justify-center py-2"><Loader2 className="h-5 w-5 animate-spin" /></div>
-                  ) : user ? (
-                    <>
-                      <Link href="/dashboard" className="text-sm font-medium py-2 hover:text-primary" onClick={() => setIsMenuOpen(false)}>Dashboard</Link>
-                    </>
-                  ) : (
-                    <>
-                      <Link
-                        href="/login"
-                        className="text-sm font-medium py-2 hover:text-primary"
-                        onClick={() => setIsMenuOpen(false)}
-                      >
-                        Log in
-                      </Link>
-                      <Button asChild className="w-full">
-                        <Link href="/signup" onClick={() => setIsMenuOpen(false)}>Get Started</Link>
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </header>
+      <Header />
 
       {/* Hero Section */}
       <section ref={heroRef} className="relative overflow-hidden py-20 md:py-32">
@@ -350,7 +175,7 @@ export default function LandingPage() {
                 <Button size="lg" className="h-12 px-8 group relative overflow-hidden" asChild>
                   <Link href={user ? "/dashboard" : "/signup"}>
                     <span className="relative z-10 flex items-center">
-                      {user ? "Go to Dashboard" : "Try for free"}
+                      {user ? "Go to Dashboard" : "Get Started Now"}
                       <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                     </span>
                     <span className="absolute inset-0 bg-white/20 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
@@ -859,11 +684,7 @@ export default function LandingPage() {
       </section>
 
       {/* How It Works Section */}
-      <section
-        ref={howItWorksRef}
-        id="how-it-works"
-        className="py-24 bg-muted/30 dark:bg-muted/10 relative overflow-hidden"
-      >
+      <section ref={howItWorksRef} id="how-it-works" className="py-24 bg-muted/30 dark:bg-muted/10 relative overflow-hidden" >
         <div className="absolute top-0 right-0 -z-10 h-[600px] w-[600px] rounded-full bg-primary/5 blur-3xl" />
         <div className="absolute bottom-0 left-0 -z-10 h-[600px] w-[600px] rounded-full bg-blue-500/5 blur-3xl" />
 
@@ -1123,51 +944,54 @@ export default function LandingPage() {
             {[
               {
                 title: "Free",
-                description: "Perfect for trying out the platform",
-                price: "$0",
+                description: "Perfect for getting started",
+                price: "£0",
                 period: "/month",
                 note: "No credit card required",
                 features: [
-                  { included: true, text: "10 documents per month" },
+                  { included: true, text: "10 pages per month" },
                   { included: true, text: "Basic extraction features" },
-                  { included: true, text: "JSON and CSV export" },
-                  { included: false, text: "API access" },
+                  { included: true, text: "Export to JSON, Excel, CSV" },
+                  { included: false, text: "Priority support" },
                 ],
-                buttonText: "Get Started",
+                buttonText: "Start For Free",
                 buttonVariant: "outline" as const,
                 popular: false,
+                paymentLink: "/signup",
+              },
+              {
+                title: "Basic",
+                description: "For individual professionals",
+                price: "£9.99",
+                period: "/month",
+                note: "Billed monthly",
+                features: [
+                  { included: true, text: "100 pages per month" },
+                  { included: true, text: "Advanced extraction features" },
+                  { included: true, text: "Export to JSON, Excel, CSV" },
+                  { included: false, text: "Priority support" },
+                ],
+                buttonText: "Upgrade Now",
+                buttonVariant: "outline" as const,
+                popular: false,
+                paymentLink: process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_BASIC,
               },
               {
                 title: "Pro",
-                description: "For professionals and small teams",
-                price: "$29",
+                description: "For teams and businesses",
+                price: "£19.99",
                 period: "/month",
-                note: "Billed monthly or $290/year",
+                note: "Perfect for growing businesses",
                 features: [
-                  { included: true, text: "100 documents per month" },
+                  { included: true, text: "500 pages per month" },
                   { included: true, text: "Advanced extraction features" },
-                  { included: true, text: "All export formats" },
-                  { included: true, text: "API access" },
+                  { included: true, text: "Export to JSON, Excel, CSV" },
+                  { included: true, text: "Priority customer support" },
                 ],
-                buttonText: "Get Started",
+                buttonText: "Go Pro",
                 buttonVariant: "default" as const,
                 popular: true,
-              },
-              {
-                title: "Enterprise",
-                description: "For organizations with high volume needs",
-                price: "Custom",
-                period: "",
-                note: "Contact us for pricing",
-                features: [
-                  { included: true, text: "Unlimited documents" },
-                  { included: true, text: "Custom extraction models" },
-                  { included: true, text: "Dedicated support" },
-                  { included: true, text: "SLA guarantees" },
-                ],
-                buttonText: "Contact Sales",
-                buttonVariant: "outline" as const,
-                popular: false,
+                paymentLink: process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_PRO,
               },
             ].map((plan, index) => (
               <motion.div
@@ -1217,7 +1041,7 @@ export default function LandingPage() {
                       ))}
                     </ul>
                     <Button className="w-full mt-auto" variant={plan.buttonVariant} asChild>
-                      <Link href={plan.title === "Enterprise" ? "/contact" : user ? "/dashboard" : "/signup"}>{plan.buttonText}</Link>
+                      <Link href={plan.paymentLink || "#"}>{plan.buttonText}</Link>
                     </Button>
                   </CardContent>
                 </Card>
@@ -1236,12 +1060,12 @@ export default function LandingPage() {
               <div>
                 <h3 className="text-2xl font-bold mb-2">Need a custom solution?</h3>
                 <p className="text-muted-foreground mb-4">
-                  Our enterprise plan includes custom features, dedicated support, and volume discounts.
+                  Have higher volume needs or require custom features? Contact our team to discuss a tailored solution for your business.
                 </p>
                 <Button asChild className="group relative overflow-hidden">
                   <Link href="/contact">
                     <span className="relative z-10 flex items-center">
-                      Contact our sales team
+                      Contact our team
                       <ChevronRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
                     </span>
                     <span className="absolute inset-0 bg-white/20 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
@@ -1250,10 +1074,10 @@ export default function LandingPage() {
               </div>
               <div className="space-y-4">
                 {[
-                  "Custom document templates and extraction models",
-                  "Dedicated account manager and priority support",
-                  "Custom integrations with your existing systems",
-                  "On-premise deployment options available",
+                  "High-volume document processing",
+                  "Dedicated customer success manager",
+                  "Custom extraction models for your documents",
+                  "Training and onboarding assistance",
                 ].map((feature, index) => (
                   <motion.div
                     key={index}
@@ -1320,7 +1144,7 @@ export default function LandingPage() {
                 {
                   question: "What is the pricing model?",
                   answer:
-                    "Our pricing is based on the number of documents processed per month. We offer a free tier for up to 10 documents, a Pro plan at $29/month for up to 100 documents, and custom Enterprise plans for higher volumes. There are no hidden fees or long-term commitments required.",
+                    "Our pricing is based on the number of pages processed per month. We offer a Free tier with 10 pages per month at no cost, a Basic tier at £9.99/month for up to 100 pages, and a Pro tier at £19.99/month for up to 500 pages with priority support. All plans include JSON, Excel, and CSV export formats.",
                 },
                 {
                   question: "How long does implementation take?",
@@ -1330,12 +1154,12 @@ export default function LandingPage() {
                 {
                   question: "Is there a trial period?",
                   answer:
-                    "Yes, we offer a 14-day free trial of our Pro plan with no credit card required. This gives you full access to all features so you can thoroughly test the platform with your own documents before making a decision.",
+                    "We offer a Free tier that you can use indefinitely, with 10 pages per month at no cost. This allows you to try our platform with your documents before deciding to upgrade to our Basic or Pro plan for more pages and additional features.",
                 },
                 {
                   question: "What kind of support do you offer?",
                   answer:
-                    "All plans include email support with 24-hour response times. Pro plans include chat support during business hours. Enterprise plans receive dedicated account managers, priority support with guaranteed response times, and optional phone support.",
+                    "All plans include email support with 24-hour response times. Pro plans include priority support with faster response times and dedicated assistance for more complex issues.",
                 },
               ].map((faq, index) => (
                 <motion.div
@@ -1385,7 +1209,7 @@ export default function LandingPage() {
               <Button size="lg" className="h-12 px-8 group relative overflow-hidden" asChild>
                 <Link href={user ? "/dashboard" : "/signup"}>
                   <span className="relative z-10 flex items-center">
-                    {user ? "Go to Dashboard" : "Start your free trial"}
+                    {user ? "Go to Dashboard" : "Get Started Now"}
                     <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                   </span>
                   <span className="absolute inset-0 bg-white/20 transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" />
@@ -1400,7 +1224,7 @@ export default function LandingPage() {
                 </Link>
               </Button>
             </div>
-            <p className="mt-4 text-sm text-muted-foreground">No credit card required. 14-day free trial.</p>
+            <p className="mt-4 text-sm text-muted-foreground">Choose a plan that fits your needs</p>
           </motion.div>
         </div>
       </section>
@@ -1550,26 +1374,6 @@ export default function LandingPage() {
           </div>
 
           <div className="mt-12 pt-8 border-t text-center text-sm text-muted-foreground">
-            <div className="flex items-center justify-center mb-4">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 rounded-full"
-                      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                    >
-                      {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                      <span className="sr-only">Toggle theme</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Toggle theme</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
             <p>© {new Date().getFullYear()} Ingestio.io. All rights reserved.</p>
           </div>
         </div>

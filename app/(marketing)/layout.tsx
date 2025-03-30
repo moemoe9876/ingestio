@@ -1,6 +1,6 @@
 "use server"
 
-import { SiteHeader } from "@/components/utilities/site-header"
+
 
 export default async function MarketingLayout({
   children
@@ -9,12 +9,11 @@ export default async function MarketingLayout({
 }) {
   return (
     <div className="marketing-scope flex min-h-screen flex-col">
-      <SiteHeader />
       <main className="flex-1">{children}</main>
       <footer className="py-6 md:px-8 md:py-0">
         <div className="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row">
           <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
-            © {new Date().getFullYear()} App Template. All rights reserved.
+            © {new Date().getFullYear()} Ingestio.io. All rights reserved.
           </p>
         </div>
       </footer>

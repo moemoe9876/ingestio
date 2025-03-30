@@ -1,20 +1,20 @@
 // components/utilities/user-nav.tsx
 "use client";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuGroup,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { Loader2, LogOut, Settings, User as UserIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -40,17 +40,30 @@ export function UserNav() {
     );
   }
 
+  // Get initials for the fallback
+  const initials = 
+    (user.firstName?.charAt(0) || "") + 
+    (user.lastName?.charAt(0) || "");
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0">
-          <Avatar className="h-8 w-8 rounded-full">
-            <AvatarImage src={user.imageUrl} alt={user.fullName || "User"} />
-            <AvatarFallback className="bg-muted text-muted-foreground rounded-full">
-              {user.firstName?.charAt(0) || ""}
-              {user.lastName?.charAt(0) || ""}
-            </AvatarFallback>
-          </Avatar>
+        <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0 overflow-hidden">
+          {user.imageUrl ? (
+            <div className="h-full w-full rounded-full overflow-hidden">
+              <Image 
+                src={user.imageUrl} 
+                alt={user.fullName || "User"} 
+                width={36}
+                height={36}
+                className="h-full w-full object-cover"
+              />
+            </div>
+          ) : (
+            <div className="h-full w-full flex items-center justify-center bg-primary text-primary-foreground rounded-full">
+              <span className="text-sm font-medium">{initials || "U"}</span>
+            </div>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
