@@ -216,7 +216,8 @@ export default function LandingPage() {
                       initial={{ opacity: 0, x: -10 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.6 + i * 0.1 }}
-                      className="h-8 w-8 rounded-full border-2 border-background bg-muted overflow-hidden"
+                      className="h-8 w-8 rounded-full border-2 border-background bg-muted overflow-hidden hover:scale-125 hover:z-10 transition-all duration-300"
+                      style={{ zIndex: 4 - i }}
                     >
                       <img
                         src={`/landing/avatar${i}.jpg`}
@@ -249,22 +250,19 @@ export default function LandingPage() {
                     <div className="h-3 w-3 rounded-full bg-yellow-500" />
                     <div className="h-3 w-3 rounded-full bg-green-500" />
                   </div>
-                  <div className="text-xs font-medium ml-2">Ingestio.io Dashboard</div>
+                  <div className="text-xs font-medium">Ingestio.io Dashboard</div>
                 </div>
-                <div className="pt-12 pb-4 px-4 h-[400px]">
-                  <img
-                    src="/landing/ingestio_dashboard.png"
-                    alt="Ingestio.io Dashboard"
-                    className="rounded-md w-full h-full object-fill"
-                    width={600}
-                    height={500}
-                  />
-                </div>
+                <img 
+                  src="/landing/hero_dashboard.png" 
+                  alt="Ingestio.io AI Document Data Extraction Dashboard" 
+                  className="w-full h-auto object-cover rounded-b-xl"
+                  style={{ 
+                    transformOrigin: "center center",
+                    transform: `scale(1.02) translate(${mousePosition.x * 5}px, ${mousePosition.y * 5}px)`, 
+                    transition: "transform 0.2s ease-out"
+                  }}
+                />
               </div>
-              <div
-                className="absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-primary/20 blur-xl animate-pulse"
-                style={{ animationDelay: "0.5s" }}
-              />
             </motion.div>
           </div>
         </div>
@@ -294,23 +292,22 @@ export default function LandingPage() {
           </motion.p>
           <div className="flex flex-wrap justify-center gap-x-12 gap-y-8">
             {[
-              { id: 1, name: "Supabase" },
-              { id: 2, name: "Vercel" },
-              { id: 3, name: "Planetscale" },
-              { id: 4, name: "Retool" },
-              { id: 5, name: "Railway" }
+              { id: 1, name: "Acme Inc" },
+              { id: 2, name: "TechCorp" },
+              { id: 3, name: "Innovex" },
+              { id: 4, name: "DataFlow" }
             ].map((company) => (
               <motion.div
                 key={company.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.8 + company.id * 0.1 }}
-                className="h-12 transition-all hover:opacity-100"
+                className="h-14 transition-all filter grayscale hover:filter-none hover:-translate-y-1 duration-300"
               >
                 <img
                   src={`/landing/company${company.id}.png`}
                   alt={`${company.name} logo`}
-                  className="h-full w-auto object-contain"
+                  className="h-full w-auto object-contain opacity-80 hover:opacity-100 transition-opacity shadow-sm hover:shadow-md rounded-md p-1"
                   width={120}
                   height={48}
                 />
@@ -430,13 +427,21 @@ export default function LandingPage() {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5 }}
                     className="relative bg-card rounded-xl border shadow-xl overflow-hidden"
+                    whileHover={{ 
+                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
+                    }}
                   >
                     <img
                       src="/landing/document-extraction.jpg"
                       alt="Document Extraction"
-                      className="w-full"
+                      className="w-full h-auto object-cover rounded-xl hover:scale-105 transition-transform duration-500"
                       width={600}
                       height={400}
+                      style={{
+                        transformOrigin: "center center",
+                        transform: `scale(1.01) translate(${mousePosition.x * 15}px, ${mousePosition.y * 15}px)`,
+                        transition: "transform 0.2s ease-out"
+                      }}
                     />
                   </motion.div>
                 </div>
@@ -504,13 +509,21 @@ export default function LandingPage() {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5 }}
                     className="relative bg-card rounded-xl border shadow-xl overflow-hidden"
+                    whileHover={{ 
+                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
+                    }}
                   >
                     <img
                       src="/landing/data-processing.jpg"
                       alt="Data Processing"
-                      className="w-full"
+                      className="w-full h-auto object-cover rounded-xl hover:scale-105 transition-transform duration-500"
                       width={600}
                       height={400}
+                      style={{
+                        transformOrigin: "center center",
+                        transform: `scale(1.01) translate(${mousePosition.x * 15}px, ${mousePosition.y * 15}px)`,
+                        transition: "transform 0.2s ease-out"
+                      }}
                     />
                   </motion.div>
                 </div>
@@ -577,13 +590,21 @@ export default function LandingPage() {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5 }}
                     className="relative bg-card rounded-xl border shadow-xl overflow-hidden"
+                    whileHover={{ 
+                      boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)"
+                    }}
                   >
                     <img
                       src="/landing/integration.jpg"
                       alt="Integration"
-                      className="w-full"
+                      className="w-full h-auto object-cover rounded-xl hover:scale-105 transition-transform duration-500"
                       width={600}
                       height={400}
+                      style={{
+                        transformOrigin: "center center",
+                        transform: `scale(1.01) translate(${mousePosition.x * 15}px, ${mousePosition.y * 15}px)`,
+                        transition: "transform 0.2s ease-out"
+                      }}
                     />
                   </motion.div>
                 </div>
@@ -873,8 +894,8 @@ export default function LandingPage() {
                           </div>
                           <blockquote className="flex-1 mb-4 text-lg italic">"{testimonial.quote}"</blockquote>
                           <div className="flex items-center gap-4">
-                            <Avatar>
-                              <AvatarImage src={testimonial.avatar} alt={testimonial.name} />
+                            <Avatar className="border-2 border-transparent hover:border-primary transition-colors">
+                              <AvatarImage src={testimonial.avatar} alt={testimonial.name} className="object-cover hover:scale-110 transition-transform duration-300" />
                               <AvatarFallback className="bg-primary/10 text-primary">
                                 {testimonial.name.charAt(0)}
                               </AvatarFallback>

@@ -17,7 +17,6 @@ export default async function AuthLayout({ children }: AuthLayoutProps) {
     <div className="auth-scope min-h-screen flex flex-col">
       <header className="px-4 lg:px-6 h-14 flex items-center">
         <Link href="/" className="flex items-center justify-center">
-          <span className="text-lg font-bold">Ingestio.io</span>
         </Link>
       </header>
       <main className="flex-1 flex items-center justify-center">

@@ -1,108 +1,32 @@
 // components/utilities/user-nav.tsx
 "use client";
 
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
-import { useAuth, useUser } from "@clerk/nextjs";
-import { Loader2, LogOut, Settings, User as UserIcon } from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { UserButton, useUser } from "@clerk/nextjs";
+import { Loader2 } from "lucide-react";
 
 export function UserNav() {
-  const { user, isLoaded } = useUser();
-  const { signOut } = useAuth();
-  const router = useRouter();
-
-  const handleSignOut = async () => {
-    await signOut();
-    router.push("/");
-  };
+  const { isLoaded } = useUser();
 
   if (!isLoaded) {
     return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />;
   }
 
-  if (!user) {
-    return (
-       <Button variant="outline" size="sm" asChild className="rounded-full">
-         <Link href="/login">Log In</Link>
-       </Button>
-    );
-  }
-
-  // Get initials for the fallback
-  const initials = 
-    (user.firstName?.charAt(0) || "") + 
-    (user.lastName?.charAt(0) || "");
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0 overflow-hidden">
-          {user.imageUrl ? (
-            <div className="h-full w-full rounded-full overflow-hidden">
-              <Image 
-                src={user.imageUrl} 
-                alt={user.fullName || "User"} 
-                width={36}
-                height={36}
-                className="h-full w-full object-cover"
-              />
-            </div>
-          ) : (
-            <div className="h-full w-full flex items-center justify-center bg-primary text-primary-foreground rounded-full">
-              <span className="text-sm font-medium">{initials || "U"}</span>
-            </div>
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        className={cn(
-            "w-56 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
-        )}
-        align="end"
-        forceMount
-      >
-        <DropdownMenuLabel className="font-normal px-2 py-1.5">
-          <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none text-foreground">{user.fullName || "User"}</p>
-            <p className="text-xs leading-none text-muted-foreground">
-              {user.primaryEmailAddress?.emailAddress || "No email"}
-            </p>
-          </div>
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator className="bg-border -mx-1 my-1" />
-        <DropdownMenuGroup>
-          <DropdownMenuItem asChild className="focus:bg-accent focus:text-accent-foreground rounded-md">
-            <Link href="/dashboard/profile" className="flex items-center cursor-pointer">
-              <UserIcon className="mr-2 h-4 w-4" />
-              <span>Profile</span>
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild className="focus:bg-accent focus:text-accent-foreground rounded-md">
-            <Link href="/dashboard/settings" className="flex items-center cursor-pointer">
-              <Settings className="mr-2 h-4 w-4" />
-              <span>Settings</span>
-            </Link>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator className="bg-border -mx-1 my-1" />
-        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer focus:bg-destructive/10 focus:text-destructive text-destructive rounded-md">
-          <LogOut className="mr-2 h-4 w-4" />
-          <span>Log out</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <UserButton 
+      appearance={{
+        elements: {
+          rootBox: "h-9",
+          userButtonAvatarBox: "h-9 w-9",
+          userButtonTrigger: "rounded-full hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          userButtonPopoverCard: "rounded-lg border border-border bg-popover text-popover-foreground shadow-lg",
+          userButtonPopoverActions: "p-0",
+          userButtonPopoverActionButton: "rounded-md hover:bg-accent hover:text-accent-foreground",
+          userButtonPopoverFooter: "p-0",
+        }
+      }}
+      afterSignOutUrl="/"
+      userProfileMode="modal"
+      userProfileUrl="/dashboard/profile"
+    />
   );
 }
