@@ -17,7 +17,6 @@ export const profilesTable = pgTable("profiles", {
   updatedAt: timestamp("updated_at")
     .defaultNow()
     .notNull()
-    .$onUpdate(() => new Date())
 })
 
 export type InsertProfile = typeof profilesTable.$inferInsert

@@ -1,19 +1,10 @@
-import { createAdminClient } from '@/lib/supabase/admin'; // Use admin client for elevated privileges
 import { WebhookEvent } from '@clerk/nextjs/server';
 import { headers } from 'next/headers';
-import { NextResponse } from 'next/server';
 import { Webhook } from 'svix';
-
-// Ensure CLERK_WEBHOOK_SECRET is set in environment variables
-const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
+import { createClerkAdminClient } from './clerk-client';
 
 export async function POST(req: Request) {
-  if (!WEBHOOK_SECRET) {
-    console.error('CLERK_WEBHOOK_SECRET is not set');
-    return new Response('Webhook secret not configured', { status: 500 });
-  }
-
-  // Get the headers
+  // Get the webhook signature from the headers
   const headerPayload = headers();
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
@@ -21,19 +12,19 @@ export async function POST(req: Request) {
 
   // If there are no headers, error out
   if (!svix_id || !svix_timestamp || !svix_signature) {
-    return new Response('Error occured -- no svix headers', { status: 400 });
+    return new Response('Missing svix headers', { status: 400 });
   }
 
   // Get the body
   const payload = await req.json();
   const body = JSON.stringify(payload);
 
-  // Create a new Svix instance with your secret.
-  const wh = new Webhook(WEBHOOK_SECRET);
+  // Create a new Svix instance with your webhook secret
+  const wh = new Webhook(process.env.CLERK_WEBHOOK_SECRET!);
 
   let evt: WebhookEvent;
 
-  // Verify the payload with the headers
+  // Verify the webhook
   try {
     evt = wh.verify(body, {
       "svix-id": svix_id,
@@ -42,99 +33,127 @@ export async function POST(req: Request) {
     }) as WebhookEvent;
   } catch (err) {
     console.error('Error verifying webhook:', err);
-    return new Response('Error occured', { status: 400 });
+    return new Response('Error verifying webhook', { status: 400 });
   }
 
-  // Get the ID and type
-  const { id } = evt.data;
+  // Get Supabase admin client 
+  const supabase = createClerkAdminClient();
+  
+  // Handle the webhook event
   const eventType = evt.type;
 
-  console.log(`Webhook with ID of ${id} and type of ${eventType}`);
-
-  const supabase = createAdminClient();
-
-  try {
-    switch (eventType) {
-      case 'user.created':
-      case 'user.updated': {
-        const { id: userId, email_addresses, first_name, last_name, image_url, created_at, updated_at } = evt.data;
-        
-        const primaryEmail = email_addresses?.find(e => e.id === evt.data.primary_email_address_id)?.email_address;
-
-        if (!primaryEmail) {
-          console.warn(`Webhook user.created/updated: User ${userId} has no primary email address.`);
-          // Decide if you want to proceed without an email or return an error
-          // return NextResponse.json({ message: 'Primary email address missing' }, { status: 400 });
-        }
-
-        // Upsert profile data
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: userId, // Match Supabase profile ID with Clerk user ID
-            email: primaryEmail, // Use primary email
-            first_name: first_name,
-            last_name: last_name,
-            avatar_url: image_url,
-            updated_at: new Date(updated_at).toISOString(), // Ensure ISO string format
-            // created_at will be set by default value in DB on first insert
-          });
-
-        if (profileError) {
-          console.error(`Webhook user.created/updated: Error upserting profile for ${userId}`, profileError);
-          throw profileError; // Propagate error to catch block
-        }
-        console.log(`Webhook user.created/updated: Profile upserted for ${userId}`);
-
-        // If it's a new user, create default settings
-        if (eventType === 'user.created') {
-           const { error: settingsError } = await supabase
-            .from('user_settings')
-            .insert({ user_id: userId }); // Default settings will be applied by DB trigger/defaults
-
-           if (settingsError) {
-             console.error(`Webhook user.created: Error creating default settings for ${userId}`, settingsError);
-             // Decide if this is a critical error. Maybe just log it.
-           } else {
-             console.log(`Webhook user.created: Default settings created for ${userId}`);
-           }
-        }
-        break;
-      }
-      case 'user.deleted': {
-        const { id: userId, deleted } = evt.data;
-
-        if (!userId) {
-          console.error('Webhook user.deleted: Missing user ID');
-          return NextResponse.json({ message: 'Missing user ID' }, { status: 400 });
-        }
-
-        // In Supabase, typically you might just mark the user as inactive or truly delete.
-        // Since Clerk handles auth, deleting might be fine. Consider cascading deletes in Supabase schema.
-        // For now, let's attempt to delete the profile.
-        const { error } = await supabase
-          .from('profiles')
-          .delete()
-          .eq('id', userId);
-
-        if (error) {
-          console.error(`Webhook user.deleted: Error deleting profile for ${userId}`, error);
-          // Depending on RLS/permissions, this might fail if associated data exists.
-          // Consider soft delete or more robust cleanup.
-          throw error;
-        }
-        console.log(`Webhook user.deleted: Profile deleted for ${userId}`);
-        break;
-      }
-      default:
-        console.log(`Webhook ignored: Unhandled event type ${eventType}`);
+  if (eventType === 'user.created') {
+    const { id, email_addresses, image_url, first_name, last_name, created_at } = evt.data;
+    
+    const primaryEmail = email_addresses?.[0]?.email_address;
+    
+    if (!primaryEmail) {
+      return new Response('No email address found', { status: 400 });
     }
     
-    return NextResponse.json({ message: 'Webhook received successfully' }, { status: 200 });
-
-  } catch (error) {
-    console.error('Webhook Error processing event:', eventType, error);
-    // Return 500 but Clerk might retry, ensure idempotency in handlers
-    return NextResponse.json({ message: 'Internal Server Error processing webhook' }, { status: 500 });
+    try {
+      // Insert user into Supabase profiles table
+      const { data, error } = await supabase
+        .from('profiles')
+        .insert({
+          user_id: id,
+          membership: 'free', // Default to free tier
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select();
+      
+      if (error) {
+        console.error('Error creating user in Supabase:', error);
+        return new Response('Error creating user in Supabase', { status: 500 });
+      }
+      
+      console.log('User created in Supabase:', id);
+      return new Response('User created in Supabase', { status: 200 });
+    } catch (error) {
+      console.error('Error syncing user data to Supabase:', error);
+      return new Response('Error syncing user data to Supabase', { status: 500 });
+    }
   }
+  
+  if (eventType === 'user.updated') {
+    const { id } = evt.data;
+    
+    try {
+      // Check if the user exists in the profiles table
+      const { data: existingUser, error: fetchError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', id)
+        .single();
+      
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        // PGRST116 is the error code for "no rows found"
+        console.error('Error fetching user from Supabase:', fetchError);
+        return new Response('Error fetching user from Supabase', { status: 500 });
+      }
+      
+      if (!existingUser) {
+        // If user doesn't exist in Supabase, create it (migration case)
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            user_id: id,
+            membership: 'free', // Default to free tier
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        
+        if (insertError) {
+          console.error('Error creating user in Supabase during update:', insertError);
+          return new Response('Error creating user in Supabase during update', { status: 500 });
+        }
+      } else {
+        // User exists, update the updated_at timestamp
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', id);
+        
+        if (updateError) {
+          console.error('Error updating user in Supabase:', updateError);
+          return new Response('Error updating user in Supabase', { status: 500 });
+        }
+      }
+      
+      console.log('User updated in Supabase:', id);
+      return new Response('User updated in Supabase', { status: 200 });
+    } catch (error) {
+      console.error('Error syncing user update to Supabase:', error);
+      return new Response('Error syncing user update to Supabase', { status: 500 });
+    }
+  }
+
+  if (eventType === 'user.deleted') {
+    const { id } = evt.data;
+    
+    try {
+      // Delete user from Supabase profiles table
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('user_id', id);
+      
+      if (error) {
+        console.error('Error deleting user from Supabase:', error);
+        return new Response('Error deleting user from Supabase', { status: 500 });
+      }
+      
+      console.log('User deleted from Supabase:', id);
+      return new Response('User deleted from Supabase', { status: 200 });
+    } catch (error) {
+      console.error('Error deleting user from Supabase:', error);
+      return new Response('Error deleting user from Supabase', { status: 500 });
+    }
+  }
+
+  return new Response('Webhook received', { status: 200 });
 } 
+
