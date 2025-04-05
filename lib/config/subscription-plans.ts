@@ -1,7 +1,7 @@
 // Define quotas clearly
-export const FREE_PLAN_DOC_QUOTA = 25;
-export const STANDARD_PLAN_DOC_QUOTA = 300;
-export const PRO_PLAN_DOC_QUOTA = 1500;
+export const FREE_PLAN_DOC_QUOTA = 10;
+export const STANDARD_PLAN_DOC_QUOTA = 100;
+export const PRO_PLAN_DOC_QUOTA = 500;
 
 // Define batch limits
 export const BATCH_PROCESSING_LIMIT_STANDARD = 25; // Max docs per batch job for Standard
@@ -16,7 +16,9 @@ export interface SubscriptionPlan {
   name: string;
   description: string;
   priceMonthly: number | null; // Null for free
+  priceYearly: number | null; // Null for free
   stripePriceIdMonthly: string | null;
+  stripePriceIdYearly: string | null;
   documentQuota: number;
   batchProcessing: boolean;
   batchProcessingLimit: number; // Max docs per batch job
@@ -34,7 +36,9 @@ export const subscriptionPlans: Record<PlanId, SubscriptionPlan> = {
     name: 'Free',
     description: 'For personal use and evaluation',
     priceMonthly: 0,
+    priceYearly: 0,
     stripePriceIdMonthly: null, // No Stripe ID needed for free
+    stripePriceIdYearly: null,
     documentQuota: FREE_PLAN_DOC_QUOTA,
     batchProcessing: false,
     batchProcessingLimit: 0,
@@ -48,7 +52,9 @@ export const subscriptionPlans: Record<PlanId, SubscriptionPlan> = {
     name: 'Basic',
     description: 'For professionals with regular needs',
     priceMonthly: 9.99,
-    stripePriceIdMonthly: process.env.STRIPE_PRICE_BASIC_MONTHLY!,
+    priceYearly: 99.90, // ~2 months free
+    stripePriceIdMonthly: process.env.STRIPE_PRICE_BASIC_MONTHLY || null,
+    stripePriceIdYearly: process.env.STRIPE_PRICE_BASIC_YEARLY || null,
     documentQuota: STANDARD_PLAN_DOC_QUOTA,
     batchProcessing: true, // Enable batch processing for Standard
     batchProcessingLimit: BATCH_PROCESSING_LIMIT_STANDARD,
@@ -63,7 +69,9 @@ export const subscriptionPlans: Record<PlanId, SubscriptionPlan> = {
     name: 'Pro',
     description: 'For businesses needing automation',
     priceMonthly: 19.99,
-    stripePriceIdMonthly: process.env.STRIPE_PRICE_PRO_MONTHLY!,
+    priceYearly: 199.90, // ~2 months free
+    stripePriceIdMonthly: process.env.STRIPE_PRICE_PRO_MONTHLY || null,
+    stripePriceIdYearly: process.env.STRIPE_PRICE_PRO_YEARLY || null,
     documentQuota: PRO_PLAN_DOC_QUOTA,
     batchProcessing: true, // Enable batch processing for Pro
     batchProcessingLimit: BATCH_PROCESSING_LIMIT_PRO,
@@ -83,8 +91,8 @@ export function getPlanById(planId: PlanId): SubscriptionPlan | undefined {
 export function getPlanByStripePriceId(priceId: string): SubscriptionPlan | undefined {
     for (const planKey in subscriptionPlans) {
         const plan = subscriptionPlans[planKey as PlanId];
-        // Check only monthly ID
-        if (plan.stripePriceIdMonthly === priceId) {
+        // Check both monthly and yearly IDs
+        if (plan.stripePriceIdMonthly === priceId || plan.stripePriceIdYearly === priceId) {
             return plan;
         }
     }

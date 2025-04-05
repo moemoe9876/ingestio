@@ -26,7 +26,6 @@ export function UserNav() {
       }}
       afterSignOutUrl="/"
       userProfileMode="modal"
-      userProfileUrl="/dashboard/profile"
     />
   );
 }
