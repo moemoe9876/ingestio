@@ -20,6 +20,7 @@
 # Next.js build outputs and cache
 /.next/
 /out/
+tsconfig.tsbuildinfo
 
 # Production build folder
 /build
@@ -76,3 +77,4 @@ Thumbs.db
 
 # Optional: Turbo repo cache
 .turbo
+

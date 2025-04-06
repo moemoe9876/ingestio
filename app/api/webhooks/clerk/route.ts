@@ -51,25 +51,50 @@ export async function POST(req: Request) {
       return new Response('No email address found', { status: 400 });
     }
     
+    // Combine first and last name if available
+    const fullName = [first_name, last_name].filter(Boolean).join(' ') || null;
+    
     try {
-      // Insert user into Supabase profiles table
-      const { data, error } = await supabase
+      // Start a transaction to ensure both tables are updated consistently
+      // Since we're using the Supabase REST API, we'll have to simulate a transaction
+      // with multiple requests and handle errors manually
+      
+      // 1. First, insert into the users table (identity information)
+      const { error: userError } = await supabase
+        .from('users')
+        .insert({
+          user_id: id,
+          email: primaryEmail,
+          full_name: fullName,
+          avatar_url: image_url || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      
+      if (userError) {
+        console.error('Error creating user in users table:', userError);
+        return new Response('Error creating user in users table', { status: 500 });
+      }
+      
+      // 2. Then, insert into the profiles table (subscription/membership info)
+      const { error: profileError } = await supabase
         .from('profiles')
         .insert({
           user_id: id,
           membership: 'free', // Default to free tier
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        })
-        .select();
+        });
       
-      if (error) {
-        console.error('Error creating user in Supabase:', error);
-        return new Response('Error creating user in Supabase', { status: 500 });
+      if (profileError) {
+        // If profile creation fails, attempt to clean up the user record to maintain consistency
+        await supabase.from('users').delete().eq('user_id', id);
+        console.error('Error creating profile in profiles table:', profileError);
+        return new Response('Error creating profile in profiles table', { status: 500 });
       }
       
-      console.log('User created in Supabase:', id);
-      return new Response('User created in Supabase', { status: 200 });
+      console.log('User and profile created in Supabase:', id);
+      return new Response('User and profile created in Supabase', { status: 200 });
     } catch (error) {
       console.error('Error syncing user data to Supabase:', error);
       return new Response('Error syncing user data to Supabase', { status: 500 });
@@ -77,25 +102,45 @@ export async function POST(req: Request) {
   }
   
   if (eventType === 'user.updated') {
-    const { id } = evt.data;
+    const { id, email_addresses, image_url, first_name, last_name } = evt.data;
+    
+    const primaryEmail = email_addresses?.[0]?.email_address;
+    // Combine first and last name if available
+    const fullName = [first_name, last_name].filter(Boolean).join(' ') || null;
     
     try {
-      // Check if the user exists in the profiles table
-      const { data: existingUser, error: fetchError } = await supabase
+      // 1. Check if the user exists in the users table
+      const { data: existingUser, error: userFetchError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('user_id', id)
+        .single();
+      
+      // 2. Check if the profile exists in the profiles table
+      const { data: existingProfile, error: profileFetchError } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', id)
         .single();
       
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        // PGRST116 is the error code for "no rows found"
-        console.error('Error fetching user from Supabase:', fetchError);
-        return new Response('Error fetching user from Supabase', { status: 500 });
-      }
-      
-      if (!existingUser) {
-        // If user doesn't exist in Supabase, create it (migration case)
-        const { error: insertError } = await supabase
+      // If neither exists, this is an unusual situation - create both
+      if (!existingUser && !existingProfile) {
+        // Create user record
+        if (primaryEmail) {
+          await supabase
+            .from('users')
+            .insert({
+              user_id: id,
+              email: primaryEmail,
+              full_name: fullName,
+              avatar_url: image_url || null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+        }
+        
+        // Create profile record
+        await supabase
           .from('profiles')
           .insert({
             user_id: id,
@@ -103,28 +148,68 @@ export async function POST(req: Request) {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           });
-        
-        if (insertError) {
-          console.error('Error creating user in Supabase during update:', insertError);
-          return new Response('Error creating user in Supabase during update', { status: 500 });
-        }
+          
+        console.log('Created missing user and profile records during update:', id);
       } else {
-        // User exists, update the updated_at timestamp
-        const { error: updateError } = await supabase
-          .from('profiles')
-          .update({
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', id);
+        // Update operations
         
-        if (updateError) {
-          console.error('Error updating user in Supabase:', updateError);
-          return new Response('Error updating user in Supabase', { status: 500 });
+        // Update user record if it exists
+        if (existingUser) {
+          const userUpdates: Record<string, any> = { updated_at: new Date().toISOString() };
+          
+          if (primaryEmail) userUpdates.email = primaryEmail;
+          if (fullName !== undefined) userUpdates.full_name = fullName;
+          if (image_url !== undefined) userUpdates.avatar_url = image_url;
+          
+          const { error: userUpdateError } = await supabase
+            .from('users')
+            .update(userUpdates)
+            .eq('user_id', id);
+            
+          if (userUpdateError) {
+            console.error('Error updating user in users table:', userUpdateError);
+          }
+        } else if (primaryEmail) {
+          // User doesn't exist but profile does - create user
+          await supabase
+            .from('users')
+            .insert({
+              user_id: id,
+              email: primaryEmail,
+              full_name: fullName,
+              avatar_url: image_url || null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+        }
+        
+        // Update profile record if it exists
+        if (existingProfile) {
+          const { error: profileUpdateError } = await supabase
+            .from('profiles')
+            .update({
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', id);
+            
+          if (profileUpdateError) {
+            console.error('Error updating profile in profiles table:', profileUpdateError);
+          }
+        } else {
+          // Profile doesn't exist but user does - create profile
+          await supabase
+            .from('profiles')
+            .insert({
+              user_id: id,
+              membership: 'free', // Default to free tier
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
         }
       }
       
-      console.log('User updated in Supabase:', id);
-      return new Response('User updated in Supabase', { status: 200 });
+      console.log('User and/or profile updated in Supabase:', id);
+      return new Response('User and/or profile updated in Supabase', { status: 200 });
     } catch (error) {
       console.error('Error syncing user update to Supabase:', error);
       return new Response('Error syncing user update to Supabase', { status: 500 });
@@ -135,19 +220,33 @@ export async function POST(req: Request) {
     const { id } = evt.data;
     
     try {
-      // Delete user from Supabase profiles table
-      const { error } = await supabase
+      // Delete user from both tables - order matters to maintain referential integrity
+      // If there were foreign key constraints, we'd delete profiles first
+      
+      // 1. Delete from profiles table
+      const { error: profileError } = await supabase
         .from('profiles')
         .delete()
         .eq('user_id', id);
       
-      if (error) {
-        console.error('Error deleting user from Supabase:', error);
+      if (profileError) {
+        console.error('Error deleting profile from Supabase:', profileError);
+        // Continue with user deletion even if profile deletion fails
+      }
+      
+      // 2. Delete from users table
+      const { error: userError } = await supabase
+        .from('users')
+        .delete()
+        .eq('user_id', id);
+      
+      if (userError) {
+        console.error('Error deleting user from Supabase:', userError);
         return new Response('Error deleting user from Supabase', { status: 500 });
       }
       
-      console.log('User deleted from Supabase:', id);
-      return new Response('User deleted from Supabase', { status: 200 });
+      console.log('User and profile deleted from Supabase:', id);
+      return new Response('User and profile deleted from Supabase', { status: 200 });
     } catch (error) {
       console.error('Error deleting user from Supabase:', error);
       return new Response('Error deleting user from Supabase', { status: 500 });

@@ -11,7 +11,7 @@
     "type-check": "tsc --noEmit",
     "watch:type-check": "tsc --noEmit --watch",
     "lint:fix": "next lint --fix",
-    "format:write": "prettier --write \"{app,lib,db,components,context,types}/**/*.{ts,tsx}\" --cache",
+    "format": "prettier --write \"{app,lib,db,components,context,types}**/*.{ts,tsx}\" --cache",
     "format:check": "prettier --check \"{app,lib,db,components,context,types}**/*.{ts,tsx}\" --cache",
     "watch:check": "concurrently \"pnpm run watch:type-check\" \"pnpm run lint -- --watch\"",
     "biome:check": "biome check .",
@@ -20,7 +20,9 @@
     "biome:watch": "nodemon --watch \"**/*\" --ext \"ts,tsx,js,jsx,json\" --exec \"biome check .\"",
     "analyze": "ANALYZE=true pnpm run build",
     "db:generate": "pnpm drizzle-kit generate",
-    "db:migrate": "pnpm drizzle-kit migrate"
+    "db:migrate": "pnpm drizzle-kit migrate",
+    "test": "vitest run",
+    "test:db": "RUN_DB_TESTS=true vitest run db"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "^2.1.29",
@@ -111,11 +113,13 @@
     "eslint-config-next": "14.2.25",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-tailwindcss": "^3.17.5",
+    "jsdom": "^26.0.0",
     "nodemon": "^3.1.9",
     "postcss": "^8",
     "prettier": "^3.3.3",
     "supabase": "^2.20.5",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.1.1"
   }
 }
