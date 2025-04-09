@@ -14,7 +14,8 @@ export async function getAuthenticatedUser() {
 
 // Get user ID or redirect
 export async function getUserIdOrRedirect() {
-  const { userId } = auth();
+  const authResult = await auth();
+  const { userId } = authResult;
   
   if (!userId) {
     redirect("/login");
@@ -25,7 +26,8 @@ export async function getUserIdOrRedirect() {
 
 // Get user profile from database
 export async function getUserProfile() {
-  const { userId } = auth();
+  const authResult = await auth();
+  const { userId } = authResult;
   
   if (!userId) {
     redirect("/login");

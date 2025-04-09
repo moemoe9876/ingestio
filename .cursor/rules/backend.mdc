@@ -1,6 +1,7 @@
 ---
-description: Follow these rules when working on the backend.
+description: 
 globs: 
+alwaysApply: true
 ---
 ### Backend Rules
 
@@ -41,7 +42,7 @@ Example of a schema:
 ```ts
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
 
-export const todosTable = pgTable("todos", {
+export const usersTable = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: text("user_id").notNull(),
   content: text("content").notNull(),
@@ -53,8 +54,8 @@ export const todosTable = pgTable("todos", {
     .$onUpdate(() => new Date())
 })
 
-export type InsertTodo = typeof todosTable.$inferInsert
-export type SelectTodo = typeof todosTable.$inferSelect
+export type InsertTodo = typeof usersTable.$inferInsert
+export type SelectTodo = typeof usersTable.$inferSelect
 ```
 
 And exporting it:
@@ -62,7 +63,7 @@ And exporting it:
 `db/schema/index.ts`
 
 ```ts
-export * from "./todos-schema"
+export * from "./users-schema"
 ```
 
 And adding it to the schema in `db/db.ts`:

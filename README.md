@@ -72,6 +72,106 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 - [Google Gemini 2.0](https://deepmind.google/technologies/gemini/) - AI model for schema generation and data extraction
 - [shadcn/ui](https://ui.shadcn.com/) - Re-usable components built using Radix UI and Tailwind CSS 
 
+## Vercel AI SDK with Google Vertex AI Integration
+
+### Overview
+
+This project integrates with Google's Gemini models through the Vercel AI SDK and Google Vertex AI. The integration allows for both text generation and structured data extraction from various document types, including PDFs and images.
+
+### Requirements
+
+- Google Cloud Platform (GCP) project with access to Vertex AI and Gemini models
+- Service account with permission to access Vertex AI APIs
+- Environment variables configured for authentication
+
+### Configuration
+
+The following environment variables need to be set:
+
+```bash
+# Google Vertex AI Configuration
+GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-credentials.json
+GOOGLE_VERTEX_PROJECT=your-gcp-project-id
+GOOGLE_VERTEX_LOCATION=us-central1  # or your preferred region
+
+# Optional: Helicone Analytics Integration
+HELICONE_API_KEY=your-helicone-api-key
+```
+
+### Basic Usage
+
+The integration provides two primary functions:
+
+1. **Text Generation**: Generate text using Gemini models
+2. **Structured Data Extraction**: Extract structured data from documents using pre-defined schemas
+
+Example of text extraction from a document:
+
+```typescript
+import { getVertexModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
+import { generateText } from "ai";
+
+// Get a model instance
+const model = getVertexModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
+
+// Extract text from a document
+const { text } = await generateText({
+  model,
+  messages: [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Extract all invoice details from this document" },
+        { type: "file", data: documentBuffer, mimeType: "application/pdf" }
+      ],
+    },
+  ],
+});
+```
+
+Example of structured data extraction with a schema:
+
+```typescript
+import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
+import { generateObject } from "ai";
+import { z } from "zod";
+
+// Define your schema
+const invoiceSchema = z.object({
+  invoiceNumber: z.string(),
+  date: z.string(),
+  amount: z.number(),
+  vendor: z.string(),
+  lineItems: z.array(
+    z.object({
+      description: z.string(),
+      quantity: z.number(),
+      unitPrice: z.number(),
+      totalPrice: z.number(),
+    })
+  ),
+});
+
+// Get a model instance configured for structured output
+const model = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
+
+// Extract structured data from a document
+const { data } = await generateObject({
+  model,
+  schema: invoiceSchema,
+  messages: [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Extract all invoice details from this document" },
+        { type: "file", data: documentBuffer, mimeType: "application/pdf" }
+      ],
+    },
+  ],
+});
+```
+
+For more examples, see the extraction actions in `actions/ai/extraction-actions.ts`.
 
 ## License
 
