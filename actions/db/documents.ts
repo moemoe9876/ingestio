@@ -304,4 +304,86 @@ export async function fetchDocumentForReviewAction(
       error: "500"
     }
   }
+}
+
+/**
+ * Updates the extracted data for a document based on user edits or confirmations from the review page
+ * Requires user authentication and ownership verification
+ */
+export async function updateExtractedDataAction(
+  documentId: string,
+  extractionJobId: string,
+  updatedData: any
+): Promise<ActionState<void>> {
+  try {
+    // 1. Authentication check
+    const userId = await getCurrentUser()
+
+    // 2. Verify document ownership
+    const supabase = createServerClient()
+    const { data: document, error: documentError } = await supabase
+      .from("documents")
+      .select("*")
+      .eq("id", documentId)
+      .eq("user_id", userId)
+      .single()
+
+    if (documentError || !document) {
+      return {
+        isSuccess: false,
+        message: "Document not found or access denied",
+        error: "404"
+      }
+    }
+
+    // 3. Update the extracted data
+    const { error: updateError } = await supabase
+      .from("extracted_data")
+      .update({ data: updatedData })
+      .eq("document_id", documentId)
+      .eq("extraction_job_id", extractionJobId)
+      .eq("user_id", userId)
+
+    if (updateError) {
+      return {
+        isSuccess: false,
+        message: "Failed to update extracted data",
+        error: updateError.message
+      }
+    }
+
+    // 4. Optionally update document status to 'completed'
+    const { error: statusError } = await supabase
+      .from("documents")
+      .update({ status: "completed" })
+      .eq("id", documentId)
+      .eq("user_id", userId)
+
+    if (statusError) {
+      console.error("Error updating document status:", statusError)
+      // Continue even if status update fails
+    }
+
+    // 5. Track analytics event
+    await trackServerEvent("extracted_data_updated", userId, {
+      document_id: documentId,
+      extraction_job_id: extractionJobId
+    })
+
+    // 6. Revalidate path to update UI
+    revalidatePath(`/dashboard/documents/${documentId}`)
+
+    return {
+      isSuccess: true,
+      message: "Extracted data updated successfully",
+      data: undefined
+    }
+  } catch (error) {
+    console.error("Error updating extracted data:", error)
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Unknown error updating extracted data",
+      error: "500"
+    }
+  }
 } 

@@ -334,59 +334,476 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 1.6 (Redis Client), 1.9 (Subscription Config), 2.4 (Profile data), 4.1 (Auth Helpers)
     -   **User Instructions**: Implement logic based on `rate-limiting.md` strategy. Use Redis for state, not the DB table. Handle `429 Too Many Requests` errors gracefully.
 
--   [x] **Step 4.1: Create Base Action Types & Auth Helpers**
-    -   **Task**: Define `ActionState` type and server-side auth helpers.
-    -   **Files**: `types/actions.ts`, `lib/actions/utils.ts` (Optional), `lib/auth-utils.ts`.
-    -   **Step Dependencies**: 1.5, 1.4
-    -   **User Instructions**: Implement standard action return type and auth checks.
+### Step 4.1: Create Base Action Types & Auth Helpers
 
--   [x] **Step 4.2: Implement Document Upload Action**
-    -   **Task**: Create Server Action for file upload.
-    -   **Files**: `actions/db/documents.ts`.
-    -   **Step Dependencies**: 3.1, 3.3, 3.4, 4.1, **4.0 (Rate Limit Check)**, 6.4 (Usage Check), 7.2 (Analytics)
-    -   **User Instructions**: Check auth, **check rate limit**, check quota (`user_usage`), upload to Storage, insert into `documents`, update quota usage (`user_usage`), revalidate, redirect, track analytics.
+#### Prompt
+**Task**: Define the `ActionState` type and server-side authentication helpers to standardize action responses and ensure secure access control across the application.
 
--   [x] **Step 4.3: Implement AI Extraction Action**
-    -   **Task**: Create Server Action for AI extraction.
-    -   **Files**: `actions/ai/extraction.ts`, `prompts/extraction.ts` (Optional).
-    -   **Step Dependencies**: 1.7 (Vertex Client), 3.1, 3.3, 3.4, 4.1, **4.0 (Rate Limit Check)**, 4.4 (Schema Gen - if used), 7.2 (Analytics)
-    -   **User Instructions**: Check auth, **check rate limit**, fetch doc, prepare prompt, call Vertex (`generateObject`), save result to `extracted_data`, update `documents` status, track analytics.
+**Files**:
+- `types/server-action-types.ts`: Define the `ActionState` type (updated from `types/actions.ts` based on codebase).
+- `lib/auth-utils.ts`: Implement server-side authentication helpers.
 
--   [x] **Step 4.4: Implement Schema Generation Action**
-    -   **Task**: Create Server Action for schema generation.
-    -   **Files**: `actions/ai/schema.ts`, `prompts/schemaGen.ts` (Optional).
-    -   **Step Dependencies**: 1.7, 4.1, **4.0 (Rate Limit Check)**, 7.2
-    -   **User Instructions**: Check auth, **check rate limit**, call Vertex.
+**Step Dependencies**:
+- **1.4**: Clerk Authentication Setup (`@clerk/nextjs` in `package.json`, used in `app/layout.tsx`).
+- **1.5**: Supabase Client Setup (`lib/supabase/server.ts`).
 
--   [x] **Step 4.5: Implement Document Deletion Action**
-    -   **Task**: Create Server Action for document deletion.
-    -   **Files**: `actions/db/documents.ts`.
-    -   **Step Dependencies**: 3.1, 3.4, 4.1, 7.2
-    -   **User Instructions**: Check auth/ownership, delete DB record (`documents`, cascade should handle `extraction_jobs`, `extracted_data`), delete Storage file(s).
+**User Instructions**:
+1. **Define `ActionState` Type**:
+   - In `types/server-action-types.ts`, create a generic `ActionState` type to standardize server action responses. Include fields for success status, error messages, and data payloads.
+   - Example implementation:
+     ```typescript
+     export type ActionState<TData = undefined> = {
+       isSuccess: boolean;
+       message: string;
+       data?: TData;
+       error?: string;
+     };
+     ```
+   - Ensure the type is reusable across all server actions (e.g., in `actions/db/*` and `actions/ai/*`).
 
--   [x] **Step 4.6: Implement Profile/Settings Update Actions**
-    -   **Task**: Create Server Actions for user profile/settings. **Note: Profile action only updates `profiles` (membership/stripe), User action updates `users` (name/avatar).**
-    -   **Files**: `actions/db/profile.ts` (`updateSubscriptionProfileAction`), `actions/db/users.ts` (`updateUserIdentityAction`).
-    -   **Step Dependencies**: 3.1, 3.4, 4.1, 7.2
-    -   **User Instructions**: Validate input. Ensure actions target the correct table.
+2. **Implement Authentication Helpers**:
+   - In `lib/auth-utils.ts`, create server-side functions using Clerk’s `@clerk/nextjs` to manage authentication:
+     - `getCurrentUser()`: Retrieves the authenticated user’s ID or throws an error if unauthenticated. Use `auth()` from `@clerk/nextjs/server`.
+     - `isUserAuthenticated()`: Returns a boolean indicating if the user is authenticated.
+   - Example:
+     ```typescript
+     import { auth } from "@clerk/nextjs/server";
 
--   [ ] **Step 4.7: Implement Document Data Fetching Action**
-    -   **Task**: Create Server Action to fetch data for review page.
-    -   **Files**: `actions/db/documents.ts`.
-    -   **Step Dependencies**: 3.1, 3.3, 4.1, 4.3
-    -   **User Instructions**: Fetch `documents`, generate signed URL, fetch `extracted_data`.
+     export async function getCurrentUser() {
+       const { userId } = auth();
+       if (!userId) throw new Error("Unauthorized");
+       return userId;
+     }
 
--   [ ] **Step 4.8: Implement Document Update Action (Review Page)**
-    -   **Task**: Create Server Action to save confirmed/edited data.
-    -   **Files**: `actions/db/documents.ts` (`updateExtractedDataAction`).
-    -   **Step Dependencies**: 3.1, 3.4, 4.1, 7.2
-    -   **User Instructions**: Update `extracted_data` record. Update `documents` status if needed.
+     export async function isUserAuthenticated() {
+       const { userId } = auth();
+       return !!userId;
+     }
+     ```
+
+3. **Integrate with Supabase**:
+   - Use `lib/supabase/server.ts` to create a Supabase client with the authenticated user’s context. Ensure helpers align with Supabase’s RLS policies by passing Clerk’s user ID where needed.
+   - Example usage in actions: `const supabase = createSupabaseServerClient();`.
+
+4. **Testing**:
+   - Add unit tests in `__tests__/auth-utils.test.ts` (create this file if not present) to verify `getCurrentUser()` and `isUserAuthenticated()` behavior for authenticated and unauthenticated scenarios.
+
+---
+
+[x] 
+### Step 4.2: Implement Document Upload Action
+
+#### Prompt
+**Task**: Create a server action for uploading documents, ensuring it respects rate limits, checks user quotas, and updates usage metrics.
+
+**Files**:
+- `actions/db/documents.ts`: Implement the `uploadDocumentAction` server action.
+
+**Step Dependencies**:
+- **3.1**: Database Schema (`db/schema/documents-schema.ts`, `db/schema/user-usage-schema.ts`).
+- **3.3**: Storage Buckets Setup (implied via Supabase Storage in `lib/supabase/server.ts`).
+- **3.4**: RLS Policies (tested in `__tests__/rls/documents.test.ts`).
+- **4.0**: Rate Limit Check (`lib/rate-limiting/limiter.ts`).
+- **4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **6.4**: Usage Check (`actions/db/user-usage-actions.ts`).
+- **7.2**: Analytics (`lib/analytics/server.ts`).
+
+**User Instructions**:
+1. **Authentication Check**:
+   - Use `getCurrentUser()` from `lib/auth-utils.ts` to verify the user is authenticated and retrieve their ID.
+
+2. **Rate Limit Check**:
+   - Fetch the user’s subscription tier from `profiles` using `getProfileByUserIdAction` in `actions/db/profiles-actions.ts`.
+   - Apply the appropriate rate limiter from `lib/rate-limiting/limiter.ts` based on the tier (e.g., Starter, Plus, Growth). Use `@upstash/ratelimit`.
+   - If exceeded, return:
+     ```typescript
+     return { isSuccess: false, message: "Rate limit exceeded", error: "429" };
+     ```
+
+3. **Quota Check**:
+   - Use `checkUserQuotaAction` from `actions/db/user-usage-actions.ts` to verify remaining pages in `user_usage`.
+   - If quota is exceeded, return:
+     ```typescript
+     return { isSuccess: false, message: "Page quota exceeded", error: "403" };
+     ```
+
+4. **File Upload**:
+   - Use `lib/supabase/server.ts` to upload the file to the `documents` bucket, prefixing the path with the user’s ID (e.g., `${userId}/filename.pdf`) for RLS enforcement.
+   - Insert metadata into `documents` table via Supabase client.
+
+5. **Update Usage**:
+   - Call `incrementPagesProcessedAction` from `actions/db/user-usage-actions.ts` to update `pagesProcessed` in `user_usage`.
+
+6. **Revalidation and Redirection**:
+   - Revalidate relevant Next.js paths (e.g., `/dashboard/upload`) using `revalidatePath` from `next/cache`.
+   - Redirect to the document review page using `redirect` from `next/navigation`.
+
+7. **Analytics**:
+   - Use `trackApiUsage` from `lib/analytics/server.ts` to log the upload event (e.g., PostHog integration).
+
+8. **Error Handling**:
+   - Return appropriate `ActionState` responses for rate limit, quota, and upload errors.
+
+---
+
+---
+
+### ---
+
+[x]
+### Step 4.3: Implement AI Extraction Action
+
+#### Prompt
+**Task**: Create server actions for AI-based document extraction using the Vertex AI client, respecting rate limits, quotas, and **effectively utilizing user-provided or default extraction prompts, potentially enhanced by document type detection, based on established guidelines**.
+
+**Files**:
+- `actions/ai/extraction-actions.ts`: Implement `extractDocumentDataAction`, `extractTextAction`, `extractInvoiceDataAction`, `extractResumeDataAction`, etc.
+- `prompts/extraction.ts`: Define default extraction prompts, system instructions, and helper functions (`enhancePrompt`, `getDefaultPrompt`).
+
+**Step Dependencies**:
+- **1.7**: Vertex Client Setup (`lib/ai/vertex-client.ts`).
+- **3.1**: Database Schema (`db/schema/documents-schema.ts`, `db/schema/extracted-data-schema.ts`, `db/schema/extraction-jobs-schema.ts`).
+- **3.3**: Storage Buckets (via `lib/supabase/server.ts`).
+- **3.4**: RLS Policies (`__tests__/rls/documents.test.ts`).
+- **4.0**: Rate Limit Check (`lib/rate-limiting/limiter.ts`).
+- **4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **4.4**: Schema Generation (optional, `actions/ai/schema.ts`).
+- **7.2**: Analytics (`lib/analytics/server.ts`).
+- **User Prompt Guidelines**: Reference `docs/db-docs/user-prompt-handling-guidelines.md`.
+
+**User Instructions**:
+1.  **Authentication Check**: Use `getCurrentUser()` from `lib/auth-utils.ts`.
+2.  **Rate Limit & Quota Check**: Fetch user tier (`getProfileByUserIdAction`), apply rate limiting (`checkRateLimit`), check page quota (`checkUserQuotaAction`). Return `429`/`403` if exceeded.
+3.  **Input Validation**: Use Zod (`extractDocumentSchema`) to validate input, including `documentId` and optional `extractionPrompt`, `includeConfidence`, `includePositions`, `documentType`.
+4.  **Fetch Document & Create Job**:
+    *   Fetch the document metadata from Supabase using `documentId` and `userId` (verify ownership). Handle not found errors.
+    *   Create an initial `extraction_jobs` record (status: `processing`, store `extractionPrompt` and options). Handle errors.
+    *   Download the document file content from Supabase Storage using `document.storagePath`. Handle errors.
+    *   Convert the downloaded file `Blob` or `ArrayBuffer` to base64 using Node.js `Buffer` methods (e.g., `Buffer.from(await fileData.arrayBuffer()).toString('base64')`). **Do not use `FileReader`**.
+5.  **Document Type Detection (Optional):**
+    *   If the input `documentType` is not provided, consider adding logic (similar to old `/api/extract`) to make a quick AI call to detect the document type *before* proceeding. Store this detected type. Use this detected type for selecting default prompts if needed.
+6.  **Prepare Prompt (Crucial Step - Reference Guidelines & Old API)**:
+    *   **Select Base Prompt:**
+        *   If a valid `extractionPrompt` was provided in the input, use it.
+        *   Otherwise, use `getDefaultPrompt(detectedType || input.documentType)` from `prompts/extraction.ts` to get a suitable default.
+    *   **Enhance Prompt:** Use the `enhancePrompt(basePrompt, includeConfidence, includePositions)` function from `prompts/extraction.ts` to add instructions for JSON format, confidence scores, and position data based on the input options.
+    *   **Combine with System Instructions:** Prepend `SYSTEM_INSTRUCTIONS` from `prompts/extraction.ts`. Add context like "Analyze the following document (likely a [Detected Type])..." if type detection was performed. Ensure clear instructions for JSON output and line item handling (as seen in the old API prompt).
+7.  **Call Vertex API**:
+    *   Use `getVertexStructuredModel` from `lib/ai/vertex-client.ts`.
+    *   **Strongly prefer `generateObject`** using an appropriate Zod schema (e.g., `invoiceSchema`, `resumeSchema`, or a generic `z.record(z.any())`) over `generateText`.
+    *   Pass the fully prepared prompt (from step 6) and the base64 document content to the AI model via the `messages` array.
+    *   Handle API errors robustly (rate limits, invalid requests, model errors). Update the `extraction_jobs` record with the error message and `failed` status. Return appropriate `ActionState`.
+8.  **Process & Save Results**:
+    *   If using `generateObject`, validate the `result.object` using Zod `safeParse`.
+    *   If using `generateText`, parse `result.text`, clean it (remove markdown), and handle JSON parsing errors (potentially storing raw text as fallback).
+    *   *Optional:* Implement post-processing logic (inspired by old API) to attempt structuring poorly formatted line items if needed after initial parsing/validation.
+    *   Insert the validated/parsed extracted data into the `extracted_data` table, linking it to the job and document. Include the `documentType` (detected or provided).
+    *   Update the `extraction_jobs` record status to `completed`.
+    *   Optionally update the `documents` table status to `completed`.
+9.  **Update Usage**: Call `incrementPagesProcessedAction`.
+10. **Analytics**: Log the `extraction_completed` or `extraction_failed` event (`trackServerEvent`) with relevant details (job ID, document type, tier, etc.).
+11. **Error Handling**: Ensure all steps have robust `try...catch` blocks. Return detailed `ActionState` responses for all outcomes.
+
+---
+[x]
+### Step 4.4: Implement Schema Generation Action
+
+#### Prompt
+**Task**: Create a server action for generating schemas using the Vertex AI client, with rate limiting applied.
+
+**Files**:
+- `actions/ai/schema.ts`: Implement the `generateSchemaAction` server action.
+- `prompts/schemaGen.ts` (Optional): Define schema generation prompts.
+
+**Step Dependencies**:
+- **1.7**: Vertex Client Setup (`lib/ai/vertex-client.ts`).
+- **4.0**: Rate Limit Check (`lib/rate-limiting/limiter.ts`).
+- **4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **7.2**: Analytics (`lib/analytics/server.ts`).
+
+**User Instructions**:
+1. **Authentication Check**:
+   - Use `getCurrentUser()` from `lib/auth-utils.ts` to verify authentication.
+
+2. **Rate Limit Check**:
+   - Apply rate limiting via `lib/rate-limiting/limiter.ts` based on the user’s tier (fetched from `profiles`). Return `429` if exceeded.
+
+3. **Call Vertex API**:
+   - Use `getVertexStructuredModel` from `lib/ai/vertex-client.ts` to generate a schema with the provided input, optionally using prompts from `prompts/schemaGen.ts`.
+
+4. **Return Schema**:
+   - Return the generated schema in an `ActionState` response with `isSuccess: true`.
+
+5. **Analytics**:
+   - Track the event using `trackApiUsage` from `lib/analytics/server.ts`.
+
+---
+[x]
+### Step 4.5: Implement Document Deletion Action
+
+#### Prompt
+**Task**: Create a server action for deleting documents, ensuring proper authorization and cleanup.
+
+**Files**:
+- `actions/db/documents.ts`: Implement the `deleteDocumentAction` server action.
+
+**Step Dependencies**:
+- **3.1**: Database Schema (`db/schema/documents-schema.ts`).
+- **3.4**: RLS Policies (`__tests__/rls/documents.test.ts`).
+- **4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **7.2**: Analytics (`lib/analytics/server.ts`).
+
+**User Instructions**:
+1. **Authentication and Ownership Check**:
+   - Use `getCurrentUser()` from `lib/auth-utils.ts` to verify the user owns the document (check `user_id` in `documents`).
+
+2. **Delete Records**:
+   - Delete the document from `documents` table using `lib/supabase/server.ts`. Rely on cascading deletes for `extracted_data` and `extraction_jobs`.
+
+3. **Delete Storage Files**:
+   - Remove the file from the `documents` bucket using Supabase Storage, referencing the `storage_path` from the document record.
+
+4. **Analytics**:
+   - Track the deletion event with `trackApiUsage` from `lib/analytics/server.ts`.
+
+---
+[x]
+### Step 4.6: Implement Profile/Settings Update Actions
+
+#### Prompt
+**Task**: Create server actions for updating user profiles and settings, targeting specific tables (`profiles` for membership/stripe, `users` for identity).
+
+**Files**:
+- `actions/db/profiles-actions.ts`: Implement `updateSubscriptionProfileAction` (updated from `profile.ts`).
+- `actions/db/users-actions.ts`: Implement `updateUserIdentityAction` (updated from `users.ts`).
+
+**Step Dependencies**:
+- **3.1**: Database Schema (`db/schema/profiles-schema.ts`, `db/schema/users-schema.ts`).
+- **3.4**: RLS Policies (`__tests__/rls/profiles.test.ts`).
+- **4ich `4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **7.2**: Analytics (`lib/analytics/server.ts`).
+
+**User Instructions**:
+1. **Profile Update (`profiles` table)**:
+   - In `actions/db/profiles-actions.ts`, implement `updateSubscriptionProfileAction` to update subscription fields (e.g., `membership`, `stripe_customer_id`) in `profiles`.
+   - Validate input to prevent unauthorized changes (e.g., only allow specific fields).
+
+2. **User Update (`users` table)**:
+   - In `actions/db/users-actions.ts`, implement `updateUserIdentityAction` to update identity fields (e.g., `email`, `avatar`) in `users`.
+   - Ensure the user can only update their own record using `getCurrentUser()`.
+
+3. **Analytics**:
+   - Track updates with `trackApiUsage` from `lib/analytics/server.ts`.
+
+---
+[x]
+### Step 4.7: Implement Document Data Fetching Action
+
+#### Prompt
+**Task**: Create a server action to fetch document data for the review page, including signed URLs for secure access.
+
+**Files**:
+- `actions/db/documents.ts`: Implement `fetchDocumentForReviewAction`.
+
+**Step Dependencies**:
+- **3.1**: Database Schema (`db/schema/documents-schema.ts`, `db/schema/extracted-data-schema.ts`).
+- **3.3**: Storage Buckets (`lib/supabase/server.ts`).
+- **4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **4.3**: AI Extraction Action (`actions/ai/extraction-actions.ts`).
+
+**User Instructions**:
+1. **Fetch Document**:
+   - Query `documents` table using `lib/supabase/server.ts` with the document ID.
+
+2. **Generate Signed URL**:
+   - Use Supabase Storage to create a time-limited signed URL for the file at `storage_path`.
+
+3. **Fetch Extracted Data**:
+   - Query `extracted_data` table for associated extraction results.
+
+4. **Return Data**:
+   - Return an `ActionState` with document metadata, signed URL, and extracted data.
+
+---
+[x]
+### Step 4.8: Implement Document Update Action (Review Page)
+
+#### Prompt
+**Task**: Create a server action to save confirmed or edited extracted data from the review page.
+
+**Files**:
+- `actions/db/documents.ts`: Implement `updateExtractedDataAction`.
+
+**Step Dependencies**:
+- **3.1**: Database Schema (`db/schema/extracted-data-schema.ts`, `db/schema/documents-schema.ts`).
+- **3.4**: RLS Policies (`__tests__/rls/documents.test.ts`).
+- **4.1**: Auth Helpers (`lib/auth-utils.ts`).
+- **7.2**: Analytics (`lib/analytics/server.ts`).
+
+**User Instructions**:
+1. **Authentication Check**:
+   - Use `getCurrentUser()` from `lib/auth-utils.ts` to verify the user owns the document.
+
+2. **Update Extracted Data**:
+   - Update the `extracted_data` record with user-provided data using `lib/supabase/server.ts`.
+
+3. **Update Document Status**:
+   - Optionally update `documents` status (e.g., `reviewed`) if the review is complete.
+
+4. **Analytics**:
+   - Track the update event with `trackApiUsage` from `lib/analytics/server.ts`.
+
+
+
+
 
 ## Section 5: Build Application UI & Pages (Connecting to Backend)
 
--   [ ] **Step 5.1 - 5.10:** (Steps remain largely the same, but ensure they call the new Server Actions and fetch data correctly based on the MVP schema, especially distinguishing between `users` and `profiles` data where needed).
-    -   **Key Change:** Replace any remaining `/api/` fetch calls with Server Action imports and calls using `useTransition` where appropriate.
-    -   **Dependencies:** Rely on the corresponding Server Actions created in Section 4.
+**Goal:** Connect the existing UI components and pages (`Upload`, `Review`) to the new Server Actions and Supabase data. Build out the remaining dashboard pages (`Dashboard`, `History`, `Metrics`, `Settings`, `Billing`) using real data and actions. Replace all `/api/` fetch calls.
+
+**General Approach:** Utilize React hooks (`useState`, `useEffect`, `useTransition`) in client components for state management, triggering server actions, handling loading/error states (using `toast` or `Alert`), and displaying data returned via `ActionState`. Reference `user-prompt-handling-guidelines.md` for UI elements related to prompts.
+
+---
+
+-   [ ] **Step 5.1: Connect Upload Page & Initial Job Creation**
+    *   **Task**: Modify the Upload page (`upload/page.tsx`) and `FileUpload` component. The goal is to use `uploadDocumentAction` to save the file and metadata, and immediately create an `extraction_jobs` record to queue the extraction using the provided prompt.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/upload/page.tsx`:
+            *   Manage state for the selected `File`, the `extractionPrompt` string, and `extractionOptions` object using `useState`.
+            *   Use `useTransition` for loading state during the upload/job creation process.
+            *   Implement the primary submission handler (`handleUploadAndExtract`):
+                1.  Validate that a file is selected.
+                2.  Call `uploadDocumentAction` (from `actions/db/documents.ts`) with the `File` object and page count.
+                3.  **Crucially:** If `uploadDocumentAction` succeeds and returns the new `document` record (including its `id`), immediately call `extractDocumentDataAction` (from `actions/ai/extraction-actions.ts`) passing the `document.id`, the `extractionPrompt` state, and `extractionOptions` state. *Self-correction:* `uploadDocumentAction` should *not* create the job; it should just upload and return the document ID. The UI page will then call `extractDocumentDataAction`.
+                4.  Handle the `ActionState` response from `extractDocumentDataAction`. On success, redirect the user to the review page (`/dashboard/review/[documentId]`). On failure (rate limit, quota, upload error, extraction error), display the error message using `toast` or an `Alert`.
+        *   `components/utilities/FileUpload.tsx`:
+            *   Ensure the `Textarea` for the prompt correctly updates the `extractionPrompt` state in the parent `UploadPage` via the `onPromptChange` prop.
+            *   Pass the selected `File` object up via `onFileSelect`.
+            *   *(Optional Enhancement)*: Implement UI elements based on `user-prompt-handling-guidelines.md` (e.g., suggested prompts based on detected file type, basic prompt validation feedback).
+    *   **Step Dependencies**: 4.2 (`uploadDocumentAction`), 4.3 (`extractDocumentDataAction`), Existing UI, `db/schema/extraction-jobs-schema.ts`.
+    *   **User Instructions**: Refactor the main submission handler in `upload/page.tsx` to first call `uploadDocumentAction`, then on success, call `extractDocumentDataAction`. Use `startTransition` for loading state. Display errors clearly. Ensure prompt/options state is correctly passed from `FileUpload` to the page and then to the extraction action.
+
+-   [ ] **Step 5.2: Connect Review Page - Data Loading & Status Handling**
+    *   **Task**: Modify the Review page (`review/[id]/page.tsx`) to fetch initial data using `fetchDocumentForReviewAction` and handle different document/extraction statuses.
+    *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`.
+    *   **Step Dependencies**: 4.7 (`fetchDocumentForReviewAction`), 4.3 (`extractDocumentDataAction`), Existing UI (`DataVisualizer`, `DocumentViewer`).
+    *   **User Instructions**:
+        *   Use `useEffect` to call `fetchDocumentForReviewAction` on page load, passing the `documentId` from params. Manage loading state (`useState`).
+        *   Display errors if the action fails (document not found, auth error, signed URL error).
+        *   If the action succeeds:
+            *   Store the fetched `document`, `signedUrl`, and `extractedData` in state (`useState`).
+            *   Pass `signedUrl` to `DocumentViewer`.
+            *   Check the `document.status` (or potentially fetch the latest `extraction_jobs` status).
+            *   If `extractedData` is present and status is `completed`, pass it to `DataVisualizer`.
+            *   If `extractedData` is `null` and status is `uploaded` or `queued`, show an option to "Start Extraction" (which would call `extractDocumentDataAction` with a default or stored prompt).
+            *   If status is `processing`, show a loading/processing indicator and potentially implement polling or real-time updates (e.g., using Supabase Realtime) to refresh data when complete.
+            *   If status is `failed`, display the error message (fetched from `extraction_jobs.errorMessage`).
+
+-   [ ] **Step 5.3: Connect Review Page - Document Viewer Interaction**
+    *   **Task**: Ensure `DocumentViewer` displays the document via `signedUrl` and integrates with `DataVisualizer` for highlighting.
+    *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`, `components/utilities/DocumentViewer.tsx`, `components/utilities/PdfViewerUrl.tsx`, `components/utilities/PdfHighlightLayer.tsx`.
+    *   **Step Dependencies**: 5.2.
+    *   **User Instructions**:
+        *   Verify `signedUrl` prop is correctly passed and used.
+        *   In `review/[id]/page.tsx`, manage a `currentHighlight` state (`useState<HighlightRect | null>`).
+        *   If `extractedData` contains position info (`includePositions` was true), implement logic to generate `HighlightRect` objects when a field is hovered or selected in `DataVisualizer`. Update `currentHighlight` state.
+        *   Pass the `currentHighlight` (or an array containing it) to the `highlights` prop of `DocumentViewer`.
+        *   Implement the `onPositionClick` handler in `DocumentViewer`/`PdfViewerUrl` to calculate the clicked percentage coordinates. Pass this up to `review/[id]/page.tsx`.
+        *   In `review/[id]/page.tsx`, use the clicked coordinates to find the corresponding field in `extractedData` (if positions exist) and update the selection state for `DataVisualizer`.
+
+-   [ ] **Step 5.4: Connect Review Page - Data Visualizer Interaction**
+    *   **Task**: Ensure `DataVisualizer` displays `extractedData` and triggers highlight/selection events.
+    *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`, `components/utilities/DataVisualizer.tsx`, `components/utilities/InteractiveDataField.tsx`.
+    *   **Step Dependencies**: 5.2.
+    *   **User Instructions**:
+        *   Pass the fetched `extractedData` to `DataVisualizer`.
+        *   Implement the `onHighlight` prop in `DataVisualizer`: When a field in `InteractiveDataField` is hovered, call this prop function, passing the field's path and position data (if available). The parent page (`review/[id]/page.tsx`) will use this to update the `currentHighlight` state for `DocumentViewer`.
+        *   Implement the `onSelect` prop in `DataVisualizer`: When a field is clicked, call this prop function with the field's path and data. The parent page can use this to manage focus or editing state.
+
+-   [ ] **Step 5.5: Connect Review Page - Data Update/Confirmation**
+    *   **Task**: Implement saving confirmed or edited extracted data using `updateExtractedDataAction`.
+    *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`, `actions/db/documents.ts` (implement `updateExtractedDataAction`).
+    *   **Step Dependencies**: 4.8 (Implement `updateExtractedDataAction`), 5.2.
+    *   **User Instructions**:
+        *   Implement `updateExtractedDataAction` in `actions/db/documents.ts`: Takes `documentId` and the new `data` (JSON). Authenticates user, verifies ownership of the document, updates the corresponding record in `extracted_data`, optionally updates `documents.status` to 'reviewed', tracks analytics, returns `ActionState`.
+        *   In `review/[id]/page.tsx`, add state management (`useState`) if implementing inline editing of `extractedData`.
+        *   Create a handler function (`handleConfirm` or `handleSave`) attached to a "Confirm" or "Save" button.
+        *   This handler calls `updateExtractedDataAction` with the `documentId` and the current (potentially modified) `extractedData` state.
+        *   Use `useTransition` to manage the saving state (disable button, show spinner).
+        *   Display success/error messages from the `ActionState` response using `toast`.
+
+-   [ ] **Step 5.6: Implement History Page**
+    *   **Task**: Build the History page to list processed documents, allowing review, deletion, and filtering.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/history/page.tsx`: Client component to fetch, display, filter, and manage documents.
+        *   `actions/db/documents.ts`: Implement `fetchUserDocumentsAction`.
+    *   **Step Dependencies**: 3.1, 4.1, 4.5 (`deleteDocumentAction`).
+    *   **User Instructions**:
+        *   Implement `fetchUserDocumentsAction`: Authenticates user (`getCurrentUser`). Queries `documents` table (join with `extraction_jobs` for latest status if needed). Filters by `userId`. Accepts parameters for pagination, sorting (e.g., by `createdAt`), and filtering (e.g., by `status`, `originalFilename`). Returns `ActionState<{ documents: SelectDocument[], totalCount: number }>`.
+        *   In `history/page.tsx`: Use `useState` for documents list, filters, pagination state. Use `useEffect` to call `fetchUserDocumentsAction` initially and whenever filters/page change. Use `useTransition` for loading states.
+        *   Display documents using `components/ui/table`. Include columns for filename, status, date, actions.
+        *   Add input/select controls for filtering (filename search, status dropdown). Update state and trigger refetch on change.
+        *   Implement pagination controls using fetched `totalCount`.
+        *   Add a "Review" link/button for each row linking to `/dashboard/review/[id]`.
+        *   Add a "Delete" button for each row. On click, show a confirmation dialog (`AlertDialog`). If confirmed, call `deleteDocumentAction`, use `useTransition`, show toast on success/error, and refetch the document list on success.
+
+-   [ ] **Step 5.7: Implement Metrics Page**
+    *   **Task**: Build the Metrics page using real data fetched via server actions.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/metrics/page.tsx`: Client component to fetch and display metrics.
+        *   `actions/db/user-usage-actions.ts`: Implement `fetchUserUsageMetricsAction`.
+        *   `actions/db/documents.ts` / `actions/db/extraction-jobs.ts`: Implement actions for aggregate data (e.g., `fetchDocumentProcessingStatsAction`).
+    *   **Step Dependencies**: 3.1, 4.1.
+    *   **User Instructions**:
+        *   Implement `fetchUserUsageMetricsAction`: Authenticates user. Fetches the current record from `user_usage` for `pagesProcessed` and `pagesLimit`. Returns `ActionState`.
+        *   Implement `fetchDocumentProcessingStatsAction`: Authenticates user. Queries `documents` or `extraction_jobs` to calculate counts by status (e.g., total processed, success rate, average processing time - might require adding timestamps to jobs). Returns `ActionState`.
+        *   In `metrics/page.tsx`: Use `useEffect` to call fetching actions. Manage loading state.
+        *   Display fetched data in `components/ui/card` components.
+        *   Integrate fetched data with chart components (replace placeholders). Add date range filters that trigger refetches.
+
+-   [ ] **Step 5.8: Implement App-Specific Settings**
+    *   **Task**: Connect the Settings page UI (`settings/page.tsx`) for any app-specific settings (if different from Clerk profile). If only Clerk profile is needed, this step might be minimal.
+    *   **Files**: `app/(dashboard)/dashboard/settings/page.tsx`.
+    *   **Step Dependencies**: 4.6 (`updateUserIdentityAction` - if applicable), `getCurrentUserDataAction`.
+    *   **User Instructions**:
+        *   Determine if any settings beyond Clerk's `UserProfile` component are needed (e.g., default extraction options, notification preferences stored in `users.metadata` or `profiles`).
+        *   If yes: Fetch current settings using `getCurrentUserDataAction` or `getProfileByUserIdAction`. Create form elements. On save, call `updateUserIdentityAction` or `updateProfileAction` with the relevant data. Handle state and feedback.
+        *   If no app-specific settings are needed beyond what Clerk handles, ensure this page primarily renders the Clerk `UserProfile` component or links to it.
+
+-   [ ] **Step 5.9: Implement Billing Page**
+    *   **Task**: Create the Billing page UI and connect it to Stripe actions for plan changes and billing management.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/billing/page.tsx` (New File): Client component.
+        *   `components/utilities/PricingTable.tsx` (Optional): Reusable component.
+    *   **Step Dependencies**: 1.9 (Subscription Config), 3.1 (`profiles` schema), 4.1, 6.2 (`createCheckoutSessionAction`), 6.3 (`createBillingPortalSessionAction`), `getProfileByUserIdAction`, `getCurrentUserUsageAction`.
+    *   **User Instructions**:
+        *   Use `useEffect` to fetch user's profile (`getProfileByUserIdAction`) and current usage (`getCurrentUserUsageAction`). Manage loading state.
+        *   Display current plan details (from `profile.membership` and `subscriptionPlans` config) and usage (`usage.pagesProcessed` / `usage.pagesLimit`).
+        *   Display available plans (potentially using `PricingTable` component).
+        *   Implement "Upgrade"/"Change Plan" buttons:
+            *   Use `useTransition`.
+            *   Call `createCheckoutSessionAction` with the target `planId`.
+            *   On success, redirect the user to the returned Stripe `url`.
+            *   Show errors via `toast`.
+        *   Implement "Manage Billing" button:
+            *   Show only if `profile.stripeCustomerId` exists.
+            *   Use `useTransition`.
+            *   Call `createBillingPortalSessionAction`.
+            *   On success, redirect user to the returned Stripe Portal `url`.
+            *   Show errors via `toast`.
+
+-   [ ] **Step 5.10: Implement Dashboard Page**
+    *   **Task**: Connect the main Dashboard page (`dashboard/page.tsx`) to display real summary data.
+    *   **Files**: `app/(dashboard)/dashboard/page.tsx`.
+    *   **Step Dependencies**: Actions created in 5.6, 5.7.
+    *   **User Instructions**:
+        *   Use `useEffect` or server-side fetching to call actions like `fetchUserDocumentsAction` (with limit 5, sorted by date) and `fetchUserUsageMetricsAction`.
+        *   Populate the summary cards (Total Documents, Processing Rate, Usage, etc.) with the fetched data.
+        *   Populate the "Recent Documents" list.
+        *   Replace chart placeholders with actual chart components if implementing charts, feeding them fetched data.
+        *   Ensure links/buttons navigate to the correct pages (Upload, History, etc.).
+
+---
 
 ## Section 6: Payment Integration (Stripe) - Actions & Webhooks
 

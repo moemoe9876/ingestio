@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { FileUpload } from "@/components/utilities/FileUpload";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { FileIcon, FileText, Upload, AlertCircle, CheckCircle2, RotateCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { extractDocumentDataAction } from "@/actions/ai/extraction-actions";
+import { uploadDocumentAction } from "@/actions/db/documents";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Separator } from "@/components/ui/separator";
-import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/components/ui/use-toast";
+import { FileUpload } from "@/components/utilities/FileUpload";
+import { AnimatePresence, motion } from "framer-motion";
+import { AlertCircle, CheckCircle2, FileText, RotateCw, Upload } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
 
 // Define the stages of the upload process
 enum UploadStage {
@@ -28,6 +30,7 @@ interface ExtractionOptions {
 
 export default function UploadPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [extractionPrompt, setExtractionPrompt] = useState<string>("");
   const [extractionOptions, setExtractionOptions] = useState<ExtractionOptions>({
@@ -36,7 +39,7 @@ export default function UploadPage() {
     detectDocumentType: true,
     temperature: 0.1
   });
-  const [loading, setLoading] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const [uploadStage, setUploadStage] = useState<UploadStage>(UploadStage.UPLOAD);
   const [progress, setProgress] = useState(0);
   const [documentId, setDocumentId] = useState<string | null>(null);
@@ -89,62 +92,78 @@ export default function UploadPage() {
   const handleUpload = async () => {
     if (!file) {
       setError("Please select a file to upload");
+      toast({
+        title: "Error",
+        description: "Please select a file to upload",
+        variant: "destructive"
+      });
       return;
     }
 
     try {
-      setLoading(true);
       setUploadStage(UploadStage.PROCESSING);
       setProgress(0);
       
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append("file", file);
+      // Estimate page count - in real app, this should be detected from the file
+      const estimatedPageCount = 1; // Default to 1 for now
       
-      // Add the extraction prompt if provided
-      if (extractionPrompt) {
-        formData.append("extractionPrompt", extractionPrompt);
-      }
-      
-      // Add extraction options
-      if (extractionOptions) {
-        formData.append("options", JSON.stringify(extractionOptions));
-      }
-      
-      // Upload the file to the server
-      const uploadResponse = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
+      startTransition(async () => {
+        try {
+          // Step 1: Upload document
+          const uploadResult = await uploadDocumentAction(file, estimatedPageCount);
+          
+          if (!uploadResult.isSuccess) {
+            throw new Error(uploadResult.message || "Failed to upload document");
+          }
+          
+          // Store document ID
+          setDocumentId(uploadResult.data?.id || null);
+          setProgress(50);
+          
+          // Step 2: Extract data from document
+          if (uploadResult.data?.id) {
+            const extractionResult = await extractDocumentDataAction({
+              documentId: uploadResult.data.id,
+              extractionPrompt: extractionPrompt,
+              includeConfidence: extractionOptions.includeConfidence,
+              includePositions: extractionOptions.includePositions,
+              documentType: extractionOptions.detectDocumentType ? undefined : "unknown"
+            });
+            
+            if (!extractionResult.isSuccess) {
+              throw new Error(extractionResult.message || "Failed to extract data");
+            }
+            
+            setProgress(100);
+            // Router will redirect to review page after upload is complete
+            // This happens inside uploadDocumentAction
+          }
+        } catch (error) {
+          console.error("Error processing request:", error);
+          setError(error instanceof Error ? error.message : "An unknown error occurred");
+          setUploadStage(UploadStage.ERROR);
+          toast({
+            title: "Error",
+            description: error instanceof Error ? error.message : "An unknown error occurred",
+            variant: "destructive"
+          });
+        }
       });
-
-      if (!uploadResponse.ok) {
-        throw new Error("Failed to upload document");
-      }
-
-      const { documentId } = await uploadResponse.json();
-      setDocumentId(documentId);
-      
-      // Update progress to almost complete
-      setProgress(90);
-      
-      // Simulate a short delay before completing
-      setTimeout(() => {
-        setProgress(100);
-      }, 500);
-      
     } catch (error) {
       console.error("Error processing request:", error);
       setError(error instanceof Error ? error.message : "An unknown error occurred");
       setUploadStage(UploadStage.ERROR);
-    } finally {
-      setLoading(false);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive"
+      });
     }
   };
 
   const handleReset = () => {
     setFile(null);
     setExtractionPrompt("");
-    setLoading(false);
     setUploadStage(UploadStage.UPLOAD);
     setProgress(0);
     setError(null);
@@ -184,11 +203,11 @@ export default function UploadPage() {
         <div className="extract-button-container flex justify-center mt-8">
           <Button 
             onClick={handleUpload} 
-            disabled={!file || loading}
+            disabled={!file || isPending}
             size="lg"
             className="extract-data-button w-full max-w-md py-6 relative overflow-hidden group"
           >
-            {loading ? (
+            {isPending ? (
               <>
                 <RotateCw className="mr-2 h-5 w-5 animate-spin" />
                 Processing...
@@ -251,7 +270,7 @@ export default function UploadPage() {
                     <CheckCircle2 className={`h-5 w-5 ${progress >= 60 ? "text-green-500" : "text-muted-foreground/30"}`} />
                   </div>
                   <span className={progress >= 60 ? "text-foreground" : "text-muted-foreground/70"}>
-                    Document analyzed
+                    Processing document
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
@@ -259,7 +278,15 @@ export default function UploadPage() {
                     <CheckCircle2 className={`h-5 w-5 ${progress >= 90 ? "text-green-500" : "text-muted-foreground/30"}`} />
                   </div>
                   <span className={progress >= 90 ? "text-foreground" : "text-muted-foreground/70"}>
-                    Data extraction complete
+                    Extracting data
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 flex items-center justify-center">
+                    <CheckCircle2 className={`h-5 w-5 ${progress === 100 ? "text-green-500" : "text-muted-foreground/30"}`} />
+                  </div>
+                  <span className={progress === 100 ? "text-foreground" : "text-muted-foreground/70"}>
+                    Finalizing extraction
                   </span>
                 </div>
               </div>
@@ -273,38 +300,39 @@ export default function UploadPage() {
   const renderCompleteStage = () => {
     return (
       <motion.div 
-        className="success-container space-y-10"
+        className="complete-container space-y-10"
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
       >
         <div className="flex flex-col items-center justify-center text-center">
-          <div className="success-icon-container w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mb-5">
+          <div className="complete-icon-container w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center mb-5">
             <CheckCircle2 className="h-10 w-10 text-green-500" />
           </div>
-          <h3 className="text-2xl font-bold mb-3">Document Processed Successfully</h3>
+          <h3 className="text-2xl font-bold mb-3">Processing Complete!</h3>
           <p className="text-muted-foreground mx-auto max-w-md">
-            Your document has been processed and the data has been extracted. You can now review and verify the extracted information.
+            We've successfully extracted the data from your document. You can now review and edit the results.
           </p>
         </div>
         
-        <div className="action-buttons-container flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto">
+        <div className="action-buttons flex flex-col gap-4 items-center">
           <Button 
-            onClick={handleGoToReview} 
+            onClick={handleGoToReview}
+            variant="default" 
             size="lg"
-            className="w-full sm:w-auto font-medium"
+            className="w-full max-w-md py-6"
           >
-            <FileText className="mr-2 h-5 w-5" />
+            <FileText className="h-5 w-5 mr-2" />
             Review Extracted Data
           </Button>
           
-          <Button 
-            onClick={handleReset} 
-            variant="outline" 
+          <Button
+            onClick={handleReset}
+            variant="outline"
             size="lg"
-            className="w-full sm:w-auto font-medium"
+            className="w-full max-w-md py-6"
           >
-            <Upload className="mr-2 h-5 w-5" />
+            <Upload className="h-5 w-5 mr-2" />
             Upload Another Document
           </Button>
         </div>
@@ -315,18 +343,18 @@ export default function UploadPage() {
   const renderErrorStage = () => {
     return (
       <motion.div 
-        className="error-container space-y-8"
+        className="error-container space-y-10"
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
       >
         <div className="flex flex-col items-center justify-center text-center">
-          <div className="error-icon-container w-20 h-20 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-5">
-            <AlertCircle className="h-10 w-10 text-red-500" />
+          <div className="error-icon-container w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center mb-5">
+            <AlertCircle className="h-10 w-10 text-destructive" />
           </div>
           <h3 className="text-2xl font-bold mb-3">Processing Error</h3>
           <p className="text-muted-foreground mx-auto max-w-md">
-            We encountered an error while processing your document. Please try again.
+            We encountered an error while processing your document.
           </p>
         </div>
         
@@ -334,16 +362,18 @@ export default function UploadPage() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>
-            {error || "An unknown error occurred while processing your document."}
+            {error || "An unknown error occurred. Please try again."}
           </AlertDescription>
         </Alert>
         
-        <div className="flex justify-center">
-          <Button 
-            onClick={handleReset} 
+        <div className="action-buttons flex flex-col gap-4 items-center">
+          <Button
+            onClick={handleReset}
+            variant="default"
             size="lg"
-            className="w-full max-w-md"
+            className="w-full max-w-md py-6"
           >
+            <Upload className="h-5 w-5 mr-2" />
             Try Again
           </Button>
         </div>

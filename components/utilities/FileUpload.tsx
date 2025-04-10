@@ -1,18 +1,26 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import PdfViewer from "@/components/utilities/PdfViewer";
+import { cn } from "@/lib/utils";
+import { File as FileIcon, Upload as UploadIcon, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Button } from "@/components/ui/button";
-import { Upload as UploadIcon, File as FileIcon, X } from "lucide-react";
-import PdfViewer from "@/components/utilities/PdfViewer";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void;
   onPromptChange?: (prompt: string, options?: any) => void;
   initialPrompt?: string;
+}
+
+interface ExtractionOptions {
+  includeConfidence: boolean;
+  includePositions: boolean;
+  detectDocumentType: boolean;
+  temperature: number;
 }
 
 export function formatFileSize(bytes: number): string {
@@ -29,6 +37,13 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState(initialPrompt);
+  const [detectedFileType, setDetectedFileType] = useState<string | null>(null);
+  const [options, setOptions] = useState<ExtractionOptions>({
+    includeConfidence: true,
+    includePositions: false,
+    detectDocumentType: true,
+    temperature: 0.1
+  });
 
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -36,15 +51,63 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
       setSelectedFile(file);
       onFileSelect(file);
       setFile(file);
+      
+      // Simple file type detection based on name/extension
+      const fileName = file.name.toLowerCase();
+      if (fileName.includes('invoice') || fileName.includes('receipt')) {
+        setDetectedFileType('invoice');
+        suggestPrompt('invoice');
+      } else if (fileName.includes('resume') || fileName.includes('cv')) {
+        setDetectedFileType('resume');
+        suggestPrompt('resume');
+      } else if (fileName.includes('form')) {
+        setDetectedFileType('form');
+        suggestPrompt('form');
+      } else {
+        setDetectedFileType(null);
+      }
     },
     [onFileSelect]
   );
+
+  const suggestPrompt = (type: string) => {
+    let suggestedPrompt = prompt;
+    
+    if (!prompt || prompt === initialPrompt) {
+      switch (type) {
+        case 'invoice':
+          suggestedPrompt = "Extract invoice number, date, due date, vendor name, vendor address, line items, subtotal, tax, and total amount.";
+          break;
+        case 'resume':
+          suggestedPrompt = "Extract name, contact information, work experience, education, skills, and certifications.";
+          break;
+        case 'form':
+          suggestedPrompt = "Extract all form fields with their labels and values.";
+          break;
+        default:
+          suggestedPrompt = prompt;
+      }
+      
+      setPrompt(suggestedPrompt);
+      if (onPromptChange) {
+        onPromptChange(suggestedPrompt, options);
+      }
+    }
+  };
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newPrompt = e.target.value;
     setPrompt(newPrompt);
     if (onPromptChange) {
-      onPromptChange(newPrompt, {});
+      onPromptChange(newPrompt, options);
+    }
+  };
+
+  const handleOptionChange = (optionName: keyof ExtractionOptions, value: boolean | number) => {
+    const newOptions = { ...options, [optionName]: value };
+    setOptions(newOptions);
+    if (onPromptChange) {
+      onPromptChange(prompt, newOptions);
     }
   };
 
@@ -121,6 +184,7 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {formatFileSize(selectedFile?.size ?? 0)}
+                  {detectedFileType && <span className="ml-1">• Detected: {detectedFileType}</span>}
                 </p>
               </div>
               
@@ -161,6 +225,44 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
         <p className="text-xs text-muted-foreground">
           Provide specific instructions to improve extraction accuracy
         </p>
+      </div>
+      
+      <div className="extraction-options-container grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="includeConfidence" className="text-sm font-medium">Include Confidence Scores</Label>
+            <p className="text-xs text-muted-foreground">Add confidence score for each extracted field</p>
+          </div>
+          <Switch 
+            id="includeConfidence" 
+            checked={options.includeConfidence}
+            onCheckedChange={(checked) => handleOptionChange('includeConfidence', checked)}
+          />
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="includePositions" className="text-sm font-medium">Include Field Positions</Label>
+            <p className="text-xs text-muted-foreground">Add position data for highlighting fields</p>
+          </div>
+          <Switch 
+            id="includePositions" 
+            checked={options.includePositions}
+            onCheckedChange={(checked) => handleOptionChange('includePositions', checked)}
+          />
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="detectDocumentType" className="text-sm font-medium">Auto-detect Document Type</Label>
+            <p className="text-xs text-muted-foreground">Automatically identify document type</p>
+          </div>
+          <Switch 
+            id="detectDocumentType" 
+            checked={options.detectDocumentType}
+            onCheckedChange={(checked) => handleOptionChange('detectDocumentType', checked)}
+          />
+        </div>
       </div>
     </div>
   );
