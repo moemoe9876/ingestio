@@ -1,9 +1,9 @@
-import * as React from "react"
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  MoreHorizontalIcon,
+    ChevronLeftIcon,
+    ChevronRightIcon,
+    MoreHorizontalIcon,
 } from "lucide-react"
+import * as React from "react"
 
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/registry/new-york-v4/ui/button"
@@ -117,11 +117,7 @@ function PaginationEllipsis({
 }
 
 export {
-  Pagination,
-  PaginationContent,
-  PaginationLink,
-  PaginationItem,
-  PaginationPrevious,
-  PaginationNext,
-  PaginationEllipsis,
+    Pagination,
+    PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious
 }
+

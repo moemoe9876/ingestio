@@ -15,7 +15,7 @@ import {
 import { ActionState } from "@/types"
 import { eq } from "drizzle-orm"
 
-export async function createProfileAction(
+export async function getProfileAction(
   data: InsertProfile
 ): Promise<ActionState<SelectProfile>> {
   try {

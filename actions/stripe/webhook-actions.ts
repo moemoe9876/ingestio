@@ -68,8 +68,8 @@ export async function processStripeWebhookAction(
       }
       
       // Update or create usage record with new quota limits
-      if (profileResult.data?.user_id) {
-        const userId = profileResult.data.user_id
+      if (profileResult.data?.userId) {
+        const userId = profileResult.data.userId
         const plan = getPlanById(planId as PlanId)
         
         // Calculate current billing period from Stripe data
@@ -79,17 +79,17 @@ export async function processStripeWebhookAction(
         
         // Try to update existing usage record first
         const updateResult = await updateUserUsageAction(userId, {
-          documentQuota: plan.documentQuota
+          pagesLimit: plan.documentQuota
         })
         
         // If update fails, create a new usage record
         if (!updateResult.isSuccess) {
           const createResult = await createUserUsageAction({
             userId,
-            billingPeriodStart: periodStart.toISOString(),
-            billingPeriodEnd: periodEnd.toISOString(),
-            documentsProcessed: 0,
-            documentQuota: plan.documentQuota
+            billingPeriodStart: periodStart,
+            billingPeriodEnd: periodEnd,
+            pagesProcessed: 0,
+            pagesLimit: plan.documentQuota
           })
           
           if (!createResult.isSuccess) {

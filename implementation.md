@@ -151,14 +151,114 @@ Here is the detailed `implementation.md`:
 
 ## Section 3: Database & Storage Setup (Supabase)
 
--   [ ] **Step 3.1: Define & Apply Supabase Database Schema (MVP)**
-    -   **Task**: Create the **MVP** PostgreSQL schema in Supabase.
-    -   **Files**:
-        -   `supabase/migrations/YYYYMMDDHHMMSS_mvp_schema.sql`: Use SQL for the **MVP schema** (including `users`, `profiles`, `user_usage`, `documents`, `extraction_batches`, `extraction_jobs`, `extracted_data`, `exports`). **Use TEXT `user_id` PK linked to Clerk.** Include triggers.
-    -   **Step Dependencies**: 1.4
-    -   **User Instructions**: Apply schema via Supabase SQL Editor or CLI. Enable `uuid-ossp`. **Do NOT include non-MVP tables like `api_usage`, `api_metrics`, `rate_limit_windows`, etc.**
+Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Database Schema (MVP)** from the previous `implementation.md`. It breaks down the process of creating the necessary Drizzle schema files for your MVP database, generating the SQL migration, and applying it, considering your existing `users` and `profiles` tables and the need to update the subscription tier enum.
 
--   [ ] **Step 3.2: Implement Supabase RLS Policies (MVP)**
+## Section 3.1: Define & Apply Supabase Database Schema (MVP)
+
+**Goal:** Define the Drizzle ORM schemas for the MVP tables (`user_usage`, `documents`, `extraction_batches`, `extraction_jobs`, `extracted_data`, `exports`), update the existing `profiles` schema to use the new subscription tier names, generate the SQL migration, and prepare for its application to your Supabase database.
+
+---
+
+-   [x] **Step 3.1.1: Update `membership` Enum and `profiles` Schema**
+    *   **Task**: Modify the existing `membership` enum definition to use `starter`, `plus`, `growth` and ensure the `profiles` schema uses this updated enum and correctly references the `users` table's TEXT `user_id`.
+    *   **Files**:
+        *   `db/schema/profiles-schema.ts`:
+            *   Update `pgEnum` call: `export const membershipEnum = pgEnum("membership", ["starter", "plus", "growth"]);` (Ensure this matches the exact type name used in your existing migration if different).
+            *   Verify `userId` column definition: `userId: text("user_id").primaryKey().notNull().references(() => usersTable.userId, { onDelete: 'cascade' }),` (assuming `usersTable` is imported from `users-schema.ts`).
+            *   Ensure `membership` column uses the updated `membershipEnum` and defaults to `'starter'`.
+        *   `db/schema/index.ts`: Ensure `profilesTable` and `membershipEnum` are exported.
+    *   **Step Dependencies**: Existing `db/schema/profiles-schema.ts`, `db/schema/users-schema.ts`.
+    *   **User Instructions**: Modify the `pgEnum` definition in `profiles-schema.ts`. Double-check that the `userId` column is `TEXT`, `PRIMARY KEY`, and correctly references `usersTable.userId`. Update the default value for `membership` to `'starter'`.
+
+-   [x] **Step 3.1.2: Define `user_usage` Schema**
+    *   **Task**: Create a new Drizzle schema file for the `user_usage` table. This table tracks page consumption against limits per billing period.
+    *   **Files**:
+        *   `db/schema/user-usage-schema.ts` (New File):
+            *   Import necessary functions from `drizzle-orm/pg-core` (`pgTable`, `uuid`, `text`, `timestamp`, `integer`, `unique`) and reference `profilesTable` from `profiles-schema.ts`.
+            *   Define the table `userUsageTable` with columns: `id` (uuid, PK, default random), `userId` (text, notNull, FK referencing `profilesTable.userId` with cascade delete), `billingPeriodStart` (timestamp, notNull), `billingPeriodEnd` (timestamp, notNull), `pagesProcessed` (integer, notNull, default 0), `pagesLimit` (integer, notNull), `createdAt` (timestamp, notNull, default now), `updatedAt` (timestamp, notNull, default now).
+            *   Add a unique constraint on `userId` and `billingPeriodStart`.
+            *   Export the table definition and `SelectUserUsage`, `InsertUserUsage` types.
+        *   `db/schema/index.ts`: Add `export * from "./user-usage-schema";`
+    *   **Step Dependencies**: 3.1.1
+    *   **User Instructions**: Create the new file `db/schema/user-usage-schema.ts` with the specified Drizzle schema definition. Update `db/schema/index.ts` to export the new schema.
+
+-   [x] **Step 3.1.3: Define `documents` Schema**
+    *   **Task**: Create the Drizzle schema file for the `documents` table, including the `document_status` enum.
+    *   **Files**:
+        *   `db/schema/documents-schema.ts` (New File):
+            *   Import necessary functions (`pgTable`, `uuid`, `text`, `timestamp`, `integer`, `pgEnum`) and reference `profilesTable`.
+            *   Define `documentStatusEnum` as `pgEnum("document_status", ['uploaded', 'processing', 'completed', 'failed'])`.
+            *   Define `documentsTable` with columns: `id` (uuid, PK, default random), `userId` (text, notNull, FK referencing `profilesTable.userId` with cascade delete), `originalFilename` (text, notNull), `storagePath` (text, notNull), `mimeType` (text, notNull), `fileSize` (integer, notNull), `pageCount` (integer, notNull), `status` (use `documentStatusEnum`, notNull, default 'uploaded'), `createdAt`, `updatedAt`.
+            *   Export enums, table definition, and types (`SelectDocument`, `InsertDocument`).
+        *   `db/schema/index.ts`: Add `export * from "./documents-schema";`
+    *   **Step Dependencies**: 3.1.1
+    *   **User Instructions**: Create the new file `db/schema/documents-schema.ts`. Define the enum and table schema. Update `db/schema/index.ts`.
+
+-   [x] **Step 3.1.4: Define `extraction_batches` Schema**
+    *   **Task**: Create the Drizzle schema file for the `extraction_batches` table.
+    *   **Files**:
+        *   `db/schema/extraction-batches-schema.ts` (New File):
+            *   Import necessary functions (`pgTable`, `uuid`, `text`, `timestamp`, `integer`, `check`) and reference `profilesTable`.
+            *   Define `extractionBatchesTable` with columns: `id` (uuid, PK, default random), `userId` (text, notNull, FK referencing `profilesTable.userId` with cascade delete), `name` (text, nullable), `status` (text, notNull, add CHECK constraint `status IN (...)`), `documentCount` (integer, notNull, default 0), `completedCount` (integer, notNull, default 0), `failedCount` (integer, notNull, default 0), `createdAt`, `updatedAt`.
+            *   Export table definition and types (`SelectExtractionBatch`, `InsertExtractionBatch`).
+        *   `db/schema/index.ts`: Add `export * from "./extraction-batches-schema";`
+    *   **Step Dependencies**: 3.1.1
+    *   **User Instructions**: Create the new file `db/schema/extraction-batches-schema.ts`. Define the table schema including the CHECK constraint for status. Update `db/schema/index.ts`.
+
+-   [x] **Step 3.1.5: Define `extraction_jobs` Schema**
+    *   **Task**: Create the Drizzle schema file for `extraction_jobs`, including the `extraction_status` enum.
+    *   **Files**:
+        *   `db/schema/extraction-jobs-schema.ts` (New File):
+            *   Import necessary functions (`pgTable`, `uuid`, `text`, `timestamp`, `jsonb`, `pgEnum`) and reference `profilesTable`, `documentsTable`, `extractionBatchesTable`.
+            *   Define `extractionStatusEnum` as `pgEnum("extraction_status", ['queued', 'processing', 'completed', 'failed'])`.
+            *   Define `extractionJobsTable` with columns: `id` (uuid, PK, default random), `userId` (text, notNull, FK to `profilesTable.userId`), `documentId` (uuid, notNull, FK to `documentsTable.id`), `batchId` (uuid, nullable, FK to `extractionBatchesTable.id` with `onDelete: 'set null'`), `status` (use `extractionStatusEnum`, notNull, default 'queued'), `extractionPrompt` (text, nullable), `extractionOptions` (jsonb, notNull, default '{}'), `errorMessage` (text, nullable), `createdAt`, `updatedAt`.
+            *   Export enum, table definition, and types (`SelectExtractionJob`, `InsertExtractionJob`).
+        *   `db/schema/index.ts`: Add `export * from "./extraction-jobs-schema";`
+    *   **Step Dependencies**: 3.1.1, 3.1.3, 3.1.4
+    *   **User Instructions**: Create the new file `db/schema/extraction-jobs-schema.ts`. Define the enum and table schema with correct foreign keys. Update `db/schema/index.ts`.
+
+-   [x] **Step 3.1.6: Define `extracted_data` Schema**
+    *   **Task**: Create the Drizzle schema file for `extracted_data`.
+    *   **Files**:
+        *   `db/schema/extracted-data-schema.ts` (New File):
+            *   Import necessary functions (`pgTable`, `uuid`, `text`, `timestamp`, `jsonb`) and reference `extractionJobsTable`, `documentsTable`, `profilesTable`.
+            *   Define `extractedDataTable` with columns: `id` (uuid, PK, default random), `extractionJobId` (uuid, notNull, FK to `extractionJobsTable.id` with cascade delete), `documentId` (uuid, notNull, FK to `documentsTable.id` with cascade delete), `userId` (text, notNull, FK to `profilesTable.userId` with cascade delete), `data` (jsonb, notNull), `documentType` (text, nullable), `createdAt`, `updatedAt`.
+            *   Export table definition and types (`SelectExtractedData`, `InsertExtractedData`).
+        *   `db/schema/index.ts`: Add `export * from "./extracted-data-schema";`
+    *   **Step Dependencies**: 3.1.1, 3.1.3, 3.1.5
+    *   **User Instructions**: Create the new file `db/schema/extracted-data-schema.ts`. Define the table schema with correct foreign keys. Update `db/schema/index.ts`.
+
+-   [x] **Step 3.1.7: Define `exports` Schema**
+    *   **Task**: Create the Drizzle schema file for `exports`, including the `export_format` enum.
+    *   **Files**:
+        *   `db/schema/exports-schema.ts` (New File):
+            *   Import necessary functions (`pgTable`, `uuid`, `text`, `timestamp`, `pgEnum`, `customType`) and reference `profilesTable`.
+            *   Define `exportFormatEnum` as `pgEnum("export_format", ['json', 'csv', 'excel'])`.
+            *   Define `uuidArray` custom type: `const uuidArray = customType<{ data: string[] }>({ postgresql: () => 'uuid[]' });`
+            *   Define `exportsTable` with columns: `id` (uuid, PK, default random), `userId` (text, notNull, FK to `profilesTable.userId`), `format` (use `exportFormatEnum`, notNull), `status` (text, notNull, add CHECK constraint), `filePath` (text, nullable), `documentIds` (use `uuidArray`, notNull), `createdAt`, `updatedAt`.
+            *   Export enum, table definition, and types (`SelectExport`, `InsertExport`).
+        *   `db/schema/index.ts`: Add `export * from "./exports-schema";`
+    *   **Step Dependencies**: 3.1.1
+    *   **User Instructions**: Create the new file `db/schema/exports-schema.ts`. Define the enum, custom array type, and table schema. Update `db/schema/index.ts`.
+
+-   [x] **Step 3.1.8: Generate SQL Migration**
+    *   **Task**: Use Drizzle Kit to generate the SQL migration file incorporating all schema changes (updated `profiles`, new MVP tables, new enums).
+    *   **Files**: `db/migrations/*` (New SQL file will be generated).
+    *   **Step Dependencies**: All previous 3.1.x steps.
+    *   **User Instructions**:
+        1.  Run `pnpm run db:generate`. Name the migration descriptively (e.g., `add_mvp_tables`).
+        2.  **Carefully review** the generated SQL file (`db/migrations/YYYYMMDDHHMMSS_add_mvp_tables.sql`).
+        3.  **Verify:** Check for `CREATE TYPE` for new enums, `ALTER TYPE membership RENAME VALUE...` (or similar Drizzle generates for enum changes), `CREATE TABLE` for all new tables, `CREATE INDEX` statements.
+        4.  **Manually Add Triggers:** Drizzle Kit *won't* automatically add the `updated_at` triggers for the new tables. **Manually copy/paste** the `CREATE TRIGGER "update_..._updated_at" ...` statements (from the MVP schema SQL provided earlier) into the generated migration file for `user_usage`, `documents`, `extraction_batches`, `extraction_jobs`, `extracted_data`, and `exports`. Ensure they reference the correct table names and the existing `update_updated_at` function.
+        5.  **Manually Add Comments:** (Optional) Add `COMMENT ON COLUMN...` statements to the migration file if desired for clarity in the database.
+
+-   [x] **Step 3.1.9: Apply Migration to Supabase**
+    *   **Task**: Apply the generated and manually edited SQL migration file to your Supabase database.
+    *   **Files**: None (Action performed on DB).
+    *   **Step Dependencies**: 3.1.8.
+    *   **User Instructions**: **BACKUP YOUR DATABASE FIRST.** Then, either use the Supabase Dashboard SQL Editor to run the contents of the generated migration file or use the Supabase CLI (`supabase db push` if linked, or apply manually). Verify the changes in the Supabase table editor.
+
+-   [x] **Step 3.2: Implement Supabase RLS Policies (MVP)**
     -   **Task**: Define and apply RLS policies for **MVP tables**.
     -   **Files**:
         -   `supabase/migrations/YYYYMMDDHHMMSS_mvp_rls_policies.sql`: Use SQL for MVP RLS policies. Ensure policies use `auth.uid()` or `auth.jwt()->>'sub'` matching the TEXT `user_id`.

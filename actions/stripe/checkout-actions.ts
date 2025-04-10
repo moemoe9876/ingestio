@@ -4,11 +4,12 @@
  * Server actions for Stripe checkout functionality
  */
 
-import { getProfileAction } from "@/actions/db/profiles-actions"
+import { getProfileByUserIdAction } from "@/actions/db/profiles-actions"
+import { getUserByIdAction } from "@/actions/db/users-actions"
 import { PlanId, getPlanById } from "@/lib/config/subscription-plans"
 import {
-    createBillingPortalSession,
-    createCheckoutSession
+  createBillingPortalSession,
+  createCheckoutSession
 } from "@/lib/stripe"
 import { ActionState } from "@/types"
 
@@ -53,7 +54,7 @@ export async function createCheckoutSessionAction(
     }
     
     // Get user profile (to check if they already have a Stripe customer ID)
-    const profileResult = await getProfileAction(userId)
+    const profileResult = await getProfileByUserIdAction(userId)
     
     if (!profileResult.isSuccess) {
       return {
@@ -61,6 +62,9 @@ export async function createCheckoutSessionAction(
         message: `Failed to get user profile: ${profileResult.message}`
       }
     }
+
+    // Get user to get email
+    const user = await getUserByIdAction(userId)
     
     // Check for existing Stripe customer ID
     const customerId = profileResult.data?.stripeCustomerId
@@ -74,8 +78,8 @@ export async function createCheckoutSessionAction(
     const session = await createCheckoutSession({
       planId,
       userId,
-      customerId,
-      customerEmail: profileResult.data?.email,
+      customerId: customerId === null ? undefined : customerId,
+      customerEmail: user?.email,
       successUrl
     })
     
@@ -112,7 +116,7 @@ export async function createBillingPortalSessionAction(
     }
     
     // Get user profile to get Stripe customer ID
-    const profileResult = await getProfileAction(userId)
+    const profileResult = await getProfileByUserIdAction(userId)
     
     if (!profileResult.isSuccess) {
       return {
