@@ -325,7 +325,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
 
 ## Section 4: Core Application Logic (Server Actions & Rate Limiting)
 
--   [ ] **Step 4.0: Implement Rate Limiting Logic** **(New Step)**
+-   [x] **Step 4.0: Implement Rate Limiting Logic** **(New Step)**
     -   **Task**: Implement application-level rate limiting using Redis/Upstash.
     -   **Files**:
         -   `lib/rate-limiting/limiter.ts`: Define rate limiter instances (e.g., using `@upstash/ratelimit`) for different actions (e.g., extraction, general API).
@@ -334,7 +334,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 1.6 (Redis Client), 1.9 (Subscription Config), 2.4 (Profile data), 4.1 (Auth Helpers)
     -   **User Instructions**: Implement logic based on `rate-limiting.md` strategy. Use Redis for state, not the DB table. Handle `429 Too Many Requests` errors gracefully.
 
--   [ ] **Step 4.1: Create Base Action Types & Auth Helpers**
+-   [x] **Step 4.1: Create Base Action Types & Auth Helpers**
     -   **Task**: Define `ActionState` type and server-side auth helpers.
     -   **Files**: `types/actions.ts`, `lib/actions/utils.ts` (Optional), `lib/auth-utils.ts`.
     -   **Step Dependencies**: 1.5, 1.4
