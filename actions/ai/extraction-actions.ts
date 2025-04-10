@@ -1,6 +1,10 @@
 "use server";
 
+import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
+import { checkUserQuotaAction, incrementPagesProcessedAction } from "@/actions/db/user-usage-actions";
 import { getVertexModel, getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
+import { trackApiUsage } from "@/lib/monitoring/rate-limit-monitor";
+import { createRateLimiter, isBatchSizeAllowed, SubscriptionTier } from "@/lib/rate-limiting";
 import { ActionState } from "@/types";
 import { auth } from "@clerk/nextjs/server";
 import { generateObject, generateText } from "ai";
@@ -11,6 +15,7 @@ const extractTextSchema = z.object({
   documentBase64: z.string(),
   mimeType: z.string(),
   extractionPrompt: z.string().min(5).max(1000),
+  batchSize: z.number().int().min(1).optional().default(1),
 });
 
 // Define input validation schema for structured extraction
@@ -18,7 +23,79 @@ const extractStructuredDataSchema = z.object({
   documentBase64: z.string(),
   mimeType: z.string(),
   extractionPrompt: z.string().min(5).max(1000),
+  batchSize: z.number().int().min(1).optional().default(1),
 });
+
+/**
+ * Apply rate limiting based on user's subscription tier
+ * @param userId User ID
+ * @param batchSize Number of pages to process
+ */
+async function applyRateLimiting(userId: string, batchSize: number = 1): Promise<{
+  isAllowed: boolean;
+  message?: string;
+  retryAfter?: number;
+  tier: SubscriptionTier;
+}> {
+  try {
+    // Get user's profile to determine subscription tier
+    const profileResult = await getProfileByUserIdAction(userId);
+    if (!profileResult.isSuccess) {
+      return {
+        isAllowed: false,
+        message: "Unable to determine user subscription tier",
+        tier: "starter"
+      };
+    }
+    
+    const tier = (profileResult.data.membership || "starter") as SubscriptionTier;
+    
+    // Check if batch size is allowed for the tier
+    if (!isBatchSizeAllowed(tier, batchSize)) {
+      return {
+        isAllowed: false,
+        message: `Batch size exceeds ${tier} tier limit`,
+        tier
+      };
+    }
+    
+    // Check if user has enough quota remaining
+    const quotaResult = await checkUserQuotaAction(userId, batchSize);
+    if (!quotaResult.isSuccess || !quotaResult.data.hasQuota) {
+      return {
+        isAllowed: false,
+        message: `Page quota exceeded. You have ${quotaResult.data?.remaining || 0} pages remaining for this billing period`,
+        tier
+      };
+    }
+    
+    // Apply rate limiting for API requests
+    const rateLimiter = createRateLimiter(userId, tier, "extraction");
+    const { success, reset } = await rateLimiter.limit(userId);
+    
+    if (!success) {
+      const retryAfter = Math.ceil((reset - Date.now()) / 1000);
+      return {
+        isAllowed: false,
+        message: `Rate limit exceeded. Too many requests at once. Please try again in ${retryAfter} seconds`,
+        retryAfter,
+        tier
+      };
+    }
+    
+    return {
+      isAllowed: true,
+      tier
+    };
+  } catch (error) {
+    console.error("Error applying rate limiting:", error);
+    return {
+      isAllowed: false,
+      message: "Error checking rate limits",
+      tier: "starter"
+    };
+  }
+}
 
 /**
  * Action to extract text from a document using Vertex AI
@@ -43,7 +120,16 @@ export async function extractTextAction(
       };
     }
 
-    const { documentBase64, mimeType, extractionPrompt } = parsedInput.data;
+    const { documentBase64, mimeType, extractionPrompt, batchSize = 1 } = parsedInput.data;
+    
+    // Apply rate limiting
+    const rateLimitResult = await applyRateLimiting(userId, batchSize);
+    if (!rateLimitResult.isAllowed) {
+      return {
+        isSuccess: false,
+        message: rateLimitResult.message || "Rate limit exceeded",
+      };
+    }
 
     // Get Vertex model
     const model = getVertexModel(VERTEX_MODELS.GEMINI_2_0_FLASH, {
@@ -71,6 +157,13 @@ export async function extractTextAction(
         },
       ],
     });
+    
+    // Track API usage (estimate token usage based on response size)
+    const estimatedTokens = Math.ceil(result.text.length / 4);
+    await trackApiUsage(estimatedTokens);
+    
+    // Increment the user's processed pages count
+    await incrementPagesProcessedAction(userId, batchSize);
 
     return {
       isSuccess: true,
@@ -140,7 +233,16 @@ export async function extractInvoiceDataAction(
       };
     }
 
-    const { documentBase64, mimeType, extractionPrompt } = parsedInput.data;
+    const { documentBase64, mimeType, extractionPrompt, batchSize = 1 } = parsedInput.data;
+
+    // Apply rate limiting
+    const rateLimitResult = await applyRateLimiting(userId, batchSize);
+    if (!rateLimitResult.isAllowed) {
+      return {
+        isSuccess: false,
+        message: rateLimitResult.message || "Rate limit exceeded",
+      };
+    }
 
     // Get Vertex structured model
     const model = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH, {
@@ -169,6 +271,13 @@ export async function extractInvoiceDataAction(
         },
       ],
     });
+    
+    // Track API usage (estimate token usage based on response size)
+    const estimatedTokens = Math.ceil(JSON.stringify(result).length / 4);
+    await trackApiUsage(estimatedTokens);
+    
+    // Increment the user's processed pages count
+    await incrementPagesProcessedAction(userId, batchSize);
 
     return {
       isSuccess: true,

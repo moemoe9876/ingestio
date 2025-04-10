@@ -26,7 +26,9 @@
     "test:rls": "RUN_RLS_TESTS=true vitest run __tests__/rls/*.test.ts",
     "test:rls:watch": "RUN_RLS_TESTS=true vitest watch __tests__/rls/*.test.ts",
     "test:storage": "RUN_STORAGE_TESTS=true vitest run __tests__/rls/storage.test.ts",
-    "test:storage:watch": "RUN_STORAGE_TESTS=true vitest watch __tests__/rls/storage.test.ts"
+    "test:storage:watch": "RUN_STORAGE_TESTS=true vitest watch __tests__/rls/storage.test.ts",
+    "test:rate-limit": "vitest run __tests__/rate-limiting.test.ts",
+    "test:ai": "RUN_AI_TESTS=true vitest run __tests__/ai"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "^2.1.29",

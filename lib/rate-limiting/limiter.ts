@@ -1,6 +1,17 @@
 import { Ratelimit } from '@upstash/ratelimit'
 import { redis } from '../redis'
 
+/**
+ * Rate limiting implementation for Ingestion.io
+ * 
+ * IMPORTANT: The rate limiting system uses a dual approach:
+ * 1. Monthly page quotas (25/250/500 pages) are tracked in the database via user_usage tables
+ * 2. Request rate limits (RPM) are enforced using Upstash Redis with sliding windows
+ * 
+ * This hybrid approach provides both long-term quota tracking and short-term
+ * request rate protection against API abuse.
+ */
+
 // Tier-based limits from pricing recommendations
 export const RATE_LIMIT_TIERS = {
   // Starter (Free) tier - 25 pages per month
@@ -40,10 +51,13 @@ export function createRateLimiter(
 ) {
   const limit = RATE_LIMIT_TIERS[tier].requestsPerMinute
 
+  // Disable analytics when running in test mode
+  const isTestMode = process.env.NODE_ENV === 'test' || process.env.VITEST
+
   return new Ratelimit({
     redis,
     limiter: Ratelimit.slidingWindow(limit, '1 m'),
-    analytics: true,
+    analytics: !isTestMode, // Disable analytics in test mode
     prefix: `ratelimit:${action}` // Use a prefix to separate different rate limiters
   })
 }
