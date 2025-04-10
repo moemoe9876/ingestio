@@ -271,11 +271,57 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 1.4, 3.2
     -   **User Instructions**: Use RLS-based policies for `storage.objects` referencing `auth.uid()`.
 
--   [ ] **Step 3.4: Generate Supabase TypeScript Types**
-    -   **Task**: Generate TypeScript types for the **MVP schema**.
-    -   **Files**: `types/supabase.ts`.
-    -   **Step Dependencies**: 3.1
-    -   **User Instructions**: Run `supabase gen types typescript`.
+
+**Plan for Step 3.4:**
+
+-   [x] **Step 3.4.1: Ensure Supabase CLI Login & Project Linking**
+    *   **Task**: Verify that the Supabase CLI is logged in and the local project is linked to the correct remote Supabase project. The type generation command relies on introspecting the linked remote database.
+    *   **Files**: None (CLI interaction). Check `supabase/.temp/project-ref` to confirm the linked project ID (`fypuznckaysroxucvlau`).
+    *   **Step Dependencies**: Supabase CLI installed (assumed from `package.json`).
+    *   **User Instructions**:
+        1.  Run `supabase login` in your terminal if you haven't already, and follow the prompts.
+        2.  Run `supabase link --project-ref fypuznckaysroxucvlau` (replace with your actual project ref if different) and follow the prompts (it might ask for the database password). Confirm linking is successful.
+
+-   [x] **Step 3.4.2: Generate TypeScript Types**
+    *   **Task**: Execute the Supabase CLI command to generate TypeScript types based on the remote database schema and save them to the specified file.
+    *   **Files**: `types/supabase.ts` (Will be created or overwritten).
+    *   **Step Dependencies**: 3.1 (Schema applied to remote DB), 3.4.1 (CLI linked).
+    *   **User Instructions**:
+        1.  Run the following command in your project's root directory:
+            ```bash
+            supabase gen types typescript --linked > types/supabase.ts
+            ```
+        2.  *(Alternative if `--linked` doesn't work as expected)*:
+            ```bash
+            supabase gen types typescript --project-id fypuznckaysroxucvlau > types/supabase.ts
+            ```
+        3.  Confirm the command runs without errors and the `types/supabase.ts` file is generated/updated.
+
+-   [x] **Step 3.4.3: Verify Generated Types**
+    *   **Task**: Briefly inspect the generated `types/supabase.ts` file to ensure it reflects the current database schema.
+    *   **Files**: `types/supabase.ts`.
+    *   **Step Dependencies**: 3.4.2.
+    *   **User Instructions**:
+        1.  Open `types/supabase.ts`.
+        2.  Look for the main `Database` interface.
+        3.  Inside `public` -> `Tables`, verify that interfaces/types exist for your tables (e.g., `users`, `profiles`, `documents`, `user_usage`, `exports`, etc.).
+        4.  Check that column names and types within these table definitions seem correct.
+        5.  Inside `public` -> `Enums`, verify that your database enums (`membership`, `document_status`, `export_format`, `extraction_status`) are present.
+
+-   [ ] **Step 3.4.4: Integrate Generated Types**
+    *   **Task**: Ensure the generated types are correctly exported and utilized by the Supabase client instances.
+    *   **Files**:
+        *   `types/index.ts`: Verify or add `export * from "./supabase-types";` (or `./supabase` if you named the file `supabase.ts`).
+        *   `lib/supabase/client.ts`: Ensure `createBrowserClient<Database>(...)` uses the imported `Database` type.
+        *   `lib/supabase/server.ts`: Ensure `createServerClient<Database>(...)` and `createAdminClient` (using `createClient<Database>`) use the imported `Database` type.
+        *   `app/api/webhooks/clerk/clerk-client.ts`: Ensure `createClerkAdminClient` (using `createClient<Database>`) uses the imported `Database` type.
+    *   **Step Dependencies**: 3.4.3.
+    *   **User Instructions**:
+        1.  Check `types/index.ts` and make sure the generated types file (`supabase.ts` or `supabase-types.ts`) is exported.
+        2.  Go to the specified client creation files (`lib/supabase/client.ts`, `lib/supabase/server.ts`, `app/api/webhooks/clerk/clerk-client.ts`).
+        3.  Import the `Database` type from `types/index.ts` (or directly from `types/supabase.ts`).
+        4.  Ensure the Supabase client creation functions (`createBrowserClient`, `createServerClient`, `createClient`) include the generic type parameter: `<Database>`.
+
 
 ## Section 4: Core Application Logic (Server Actions & Rate Limiting)
 
