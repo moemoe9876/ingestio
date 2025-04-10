@@ -201,3 +201,30 @@ export async function updateSubscriptionProfileAction(
     };
   }
 }
+
+/**
+ * Migration helper: Update any profiles with 'free' membership to 'starter'
+ * This is for database compatibility with the membership enum
+ */
+export async function migrateFreeMembershipsToStarterAction(): Promise<ActionState<{ count: number }>> {
+  try {
+    // This approach won't work directly because Drizzle enforces the enum
+    // In a real app, you would need a database migration script
+    // For now, we'll just return a message suggesting how to fix this
+    
+    console.log('Please run a direct database query to fix the enum values:');
+    console.log('UPDATE profiles SET membership = \'starter\' WHERE membership = \'free\';');
+    
+    return {
+      isSuccess: true,
+      message: "Cannot automatically migrate. Please run a direct database query.",
+      data: { count: 0 }
+    };
+  } catch (error) {
+    console.error("Error migrating free memberships:", error);
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Unknown error during migration"
+    };
+  }
+}

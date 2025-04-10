@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          operationName?: string
-          query?: string
-          variables?: Json
-          extensions?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       documents: {
@@ -424,7 +399,7 @@ export type Database = {
       export_format: "json" | "csv" | "excel"
       export_status: "processing" | "completed" | "failed"
       extraction_status: "queued" | "processing" | "completed" | "failed"
-      membership: "free" | "pro" | "starter" | "plus" | "growth"
+      membership: "starter" | "plus" | "growth"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -538,9 +513,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       batch_status: [
@@ -554,7 +526,7 @@ export const Constants = {
       export_format: ["json", "csv", "excel"],
       export_status: ["processing", "completed", "failed"],
       extraction_status: ["queued", "processing", "completed", "failed"],
-      membership: ["free", "pro", "starter", "plus", "growth"],
+      membership: ["starter", "plus", "growth"],
     },
   },
 } as const

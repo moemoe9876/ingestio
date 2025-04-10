@@ -28,6 +28,16 @@ interface ExtractionOptions {
   temperature: number;
 }
 
+// Add this utility function to convert a File to base64
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
+};
+
 export default function UploadPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -89,6 +99,7 @@ export default function UploadPage() {
     }
   }, [progress, uploadStage]);
 
+  // Update handleUpload to use the utility function
   const handleUpload = async () => {
     if (!file) {
       setError("Please select a file to upload");
@@ -109,8 +120,19 @@ export default function UploadPage() {
       
       startTransition(async () => {
         try {
-          // Step 1: Upload document
-          const uploadResult = await uploadDocumentAction(file, estimatedPageCount);
+          // Convert File to base64 
+          const fileBase64 = await fileToBase64(file);
+          
+          // Prepare file data for server action
+          const fileData = {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            fileBase64
+          };
+          
+          // Step 1: Upload document with serializable data
+          const uploadResult = await uploadDocumentAction(fileData, estimatedPageCount);
           
           if (!uploadResult.isSuccess) {
             throw new Error(uploadResult.message || "Failed to upload document");
@@ -135,8 +157,13 @@ export default function UploadPage() {
             }
             
             setProgress(100);
-            // Router will redirect to review page after upload is complete
-            // This happens inside uploadDocumentAction
+            
+            // Manually handle redirect to the review page after a short delay
+            setTimeout(() => {
+              if (uploadResult.data?.id) {
+                router.push(`/dashboard/review/${uploadResult.data.id}`);
+              }
+            }, 1000);
           }
         } catch (error) {
           console.error("Error processing request:", error);

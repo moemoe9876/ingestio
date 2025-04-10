@@ -81,7 +81,7 @@ export async function POST(req: Request) {
         .from('profiles')
         .insert({
           user_id: id,
-          membership: 'free', // Default to free tier
+          membership: 'starter', // Default to starter tier (was 'free')
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
           .from('profiles')
           .insert({
             user_id: id,
-            membership: 'free', // Default to free tier
+            membership: 'starter', // Default to starter tier (was 'free')
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           });
@@ -201,7 +201,7 @@ export async function POST(req: Request) {
             .from('profiles')
             .insert({
               user_id: id,
-              membership: 'free', // Default to free tier
+              membership: 'starter', // Default to starter tier (was 'free')
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             });
@@ -222,6 +222,11 @@ export async function POST(req: Request) {
     try {
       // Delete user from both tables - order matters to maintain referential integrity
       // If there were foreign key constraints, we'd delete profiles first
+      
+      // Ensure id is defined before proceeding
+      if (!id) {
+        return new Response('Missing user ID in delete webhook', { status: 400 });
+      }
       
       // 1. Delete from profiles table
       const { error: profileError } = await supabase

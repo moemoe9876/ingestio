@@ -6,8 +6,10 @@
 
 import { db } from "@/db/db"
 import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema"
+import { RATE_LIMIT_TIERS } from "@/lib/rate-limiting/limiter"
 import { ActionState } from "@/types"
 import { and, eq, gte, lte } from "drizzle-orm"
+import { getProfileByUserIdAction } from "./profiles-actions"
 
 /**
  * Create a new user usage record
@@ -33,13 +35,59 @@ export async function createUserUsageAction(
 }
 
 /**
+ * Initialize user usage record for current billing period if it doesn't exist
+ */
+export async function initializeUserUsageAction(
+  userId: string
+): Promise<ActionState<SelectUserUsage>> {
+  try {
+    // Calculate billing period dates (first to last day of current month)
+    const now = new Date();
+    const billingPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const billingPeriodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    
+    // Get user profile to determine tier-based page limit
+    const profileResult = await getProfileByUserIdAction(userId);
+    const tier = profileResult.isSuccess 
+      ? (profileResult.data.membership || "starter") 
+      : "starter";
+    
+    // Get page limit for tier
+    const pagesLimit = RATE_LIMIT_TIERS[tier as keyof typeof RATE_LIMIT_TIERS]?.pagesPerMonth || 25;
+    
+    // Create new usage record
+    const [newUsage] = await db.insert(userUsageTable).values({
+      userId,
+      billingPeriodStart,
+      billingPeriodEnd,
+      pagesProcessed: 0,
+      pagesLimit,
+      createdAt: now,
+      updatedAt: now
+    }).returning();
+    
+    return {
+      isSuccess: true,
+      message: "User usage record initialized successfully",
+      data: newUsage
+    };
+  } catch (error) {
+    console.error("Error initializing user usage record:", error);
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Unknown error initializing user usage"
+    };
+  }
+}
+
+/**
  * Get user usage for current billing period
  */
 export async function getCurrentUserUsageAction(
   userId: string
 ): Promise<ActionState<SelectUserUsage>> {
   try {
-    const now = new Date()
+    const now = new Date();
     
     // Find usage record that contains the current date
     const [usage] = await db
@@ -51,26 +99,24 @@ export async function getCurrentUserUsageAction(
           lte(userUsageTable.billingPeriodStart, now),
           gte(userUsageTable.billingPeriodEnd, now)
         )
-      )
+      );
     
     if (!usage) {
-      return {
-        isSuccess: false,
-        message: "No usage record found for current billing period"
-      }
+      // No usage record found for current period - initialize one
+      return initializeUserUsageAction(userId);
     }
     
     return {
       isSuccess: true,
       message: "Retrieved user usage successfully",
       data: usage
-    }
+    };
   } catch (error) {
-    console.error("Error getting user usage:", error)
+    console.error("Error getting user usage:", error);
     return {
       isSuccess: false,
       message: error instanceof Error ? error.message : "Unknown error getting user usage"
-    }
+    };
   }
 }
 
@@ -172,6 +218,31 @@ export async function checkUserQuotaAction(
   usage: SelectUserUsage;
 }>> {
   try {
+    // In development environment, bypass quota check
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Development mode detected: Bypassing quota check');
+      
+      // Get current usage record for tracking purposes, but don't enforce limit
+      const currentUsageResult = await getCurrentUserUsageAction(userId);
+      
+      // If no usage record is found, still proceed
+      const usage = currentUsageResult.isSuccess ? currentUsageResult.data : {
+        pagesProcessed: 0,
+        pagesLimit: 999999,
+      } as SelectUserUsage;
+      
+      // Always return true in development
+      return {
+        isSuccess: true,
+        message: `Development mode: quota check bypassed`,
+        data: {
+          hasQuota: true,
+          remaining: 999999, // Effectively unlimited
+          usage
+        }
+      };
+    }
+    
     // Get current usage record
     const currentUsageResult = await getCurrentUserUsageAction(userId)
     

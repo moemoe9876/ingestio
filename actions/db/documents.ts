@@ -1,14 +1,14 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { redirect } from "next/navigation"
 
 import { db } from "@/db/db"
 import { documentsTable, InsertDocument, SelectDocument } from "@/db/schema"
 import { trackServerEvent } from "@/lib/analytics/server"
 import { getCurrentUser } from "@/lib/auth-utils"
-import { checkRateLimit, SubscriptionTier } from "@/lib/rate-limiting/limiter"
-import { createServerClient } from "@/lib/supabase/server"
+import { checkRateLimit, validateTier } from "@/lib/rate-limiting/limiter"
+import { createAdminClient } from "@/lib/supabase/server"
+import { uploadToStorage } from "@/lib/supabase/storage-utils"
 import { ActionState } from "@/types/server-action-types"
 import { getProfileByUserIdAction } from "./profiles-actions"
 import { checkUserQuotaAction, incrementPagesProcessedAction } from "./user-usage-actions"
@@ -18,8 +18,13 @@ import { checkUserQuotaAction, incrementPagesProcessedAction } from "./user-usag
  * Enforces rate limits and quota restrictions based on user tier
  */
 export async function uploadDocumentAction(
-  file: File,
-  pageCount: number
+  fileData: {
+    name: string;
+    type: string;
+    size: number;
+    fileBase64: string; // Base64 encoded file content
+  },
+  pageCount: number = 1
 ): Promise<ActionState<SelectDocument>> {
   try {
     // 1. Authentication check
@@ -35,7 +40,7 @@ export async function uploadDocumentAction(
       }
     }
 
-    const tier = (profileResult.data.membership || "starter") as SubscriptionTier
+    const tier = validateTier(profileResult.data.membership || "starter");
     const rateLimitResult = await checkRateLimit(userId, tier, "document_upload")
     
     if (!rateLimitResult.success) {
@@ -57,31 +62,37 @@ export async function uploadDocumentAction(
     }
 
     // 4. File upload to Supabase storage
-    const fileExtension = file.name.split('.').pop() || ''
-    const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const fileExtension = fileData.name.split('.').pop() || ''
+    const fileName = `${Date.now()}_${fileData.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const storagePath = `${userId}/${fileName}`
     
-    const supabase = createServerClient()
-    const { error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(storagePath, file)
+    // Convert base64 to Buffer for upload
+    const fileBuffer = Buffer.from(fileData.fileBase64.split(',')[1], 'base64')
+    
+    // Use our storage utility with service role access to bypass RLS
+    const uploadResult = await uploadToStorage(
+      'documents',
+      storagePath, // Pass the complete path with userId included
+      fileBuffer,
+      fileData.type
+    );
 
-    if (uploadError) {
-      console.error("File upload error:", uploadError)
+    if (!uploadResult.success) {
+      console.error("File upload error:", uploadResult.error)
       return { 
         isSuccess: false, 
         message: "Failed to upload file", 
-        error: uploadError.message 
+        error: uploadResult.error 
       }
     }
 
     // 5. Insert document record
     const documentData: InsertDocument = {
       userId,
-      originalFilename: file.name,
+      originalFilename: fileData.name,
       storagePath,
-      mimeType: file.type,
-      fileSize: file.size,
+      mimeType: fileData.type,
+      fileSize: fileData.size,
       pageCount,
       status: "uploaded"
     }
@@ -97,18 +108,17 @@ export async function uploadDocumentAction(
     // 7. Track analytics
     await trackServerEvent("document_uploaded", userId, {
       document_id: newDocument.id,
-      file_type: file.type,
+      file_type: fileData.type,
       page_count: pageCount,
-      file_size: file.size,
+      file_size: fileData.size,
       membership_tier: tier
     })
 
     // 8. Revalidate path
     revalidatePath("/dashboard/documents")
     
-    // 9. Redirect to document review page
-    redirect(`/dashboard/documents/${newDocument.id}`)
-    
+    // 9. Return success instead of redirecting
+    // Let the client handle redirect after extraction
     return {
       isSuccess: true,
       message: "Document uploaded successfully",
@@ -136,7 +146,7 @@ export async function deleteDocumentAction(
     const userId = await getCurrentUser()
 
     // 2. Check if document exists and belongs to the user
-    const supabase = createServerClient()
+    const supabase = await createAdminClient()
     const { data: document, error: fetchError } = await supabase
       .from("documents")
       .select("*")
@@ -149,6 +159,15 @@ export async function deleteDocumentAction(
         isSuccess: false,
         message: "Document not found or access denied",
         error: "404"
+      }
+    }
+
+    // Verify that the storage path belongs to the user as a security check
+    if (!document.storage_path.startsWith(`${userId}/`)) {
+      return {
+        isSuccess: false,
+        message: "Access denied: You can only delete your own documents",
+        error: "403"
       }
     }
 
@@ -220,7 +239,7 @@ export async function fetchDocumentForReviewAction(
     const userId = await getCurrentUser()
 
     // 2. Fetch document data and verify ownership
-    const supabase = createServerClient()
+    const supabase = await createAdminClient()
     const { data: documentData, error: documentError } = await supabase
       .from("documents")
       .select("*")
@@ -233,6 +252,15 @@ export async function fetchDocumentForReviewAction(
         isSuccess: false,
         message: "Document not found or access denied",
         error: "404"
+      }
+    }
+
+    // Additional security check to ensure storage path belongs to the user
+    if (!documentData.storage_path.startsWith(`${userId}/`)) {
+      return {
+        isSuccess: false,
+        message: "Access denied: You can only access your own documents",
+        error: "403"
       }
     }
 
@@ -320,7 +348,7 @@ export async function updateExtractedDataAction(
     const userId = await getCurrentUser()
 
     // 2. Verify document ownership
-    const supabase = createServerClient()
+    const supabase = await createAdminClient()
     const { data: document, error: documentError } = await supabase
       .from("documents")
       .select("*")

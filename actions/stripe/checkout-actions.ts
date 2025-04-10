@@ -49,7 +49,7 @@ export async function createCheckoutSessionAction(
     if (plan.priceMonthly === 0) {
       return {
         isSuccess: false,
-        message: "Cannot create checkout session for free plan"
+        message: "Cannot create checkout session for starter plan"
       }
     }
     

@@ -171,7 +171,7 @@ async function handleSubscriptionDeleted(
     }
     
     // Here you would update your database when a subscription is canceled
-    // For example, downgrade the user to the free plan
+    // For example, downgrade the user to the starter plan
     // This would likely call a database action like downgradeUserSubscription
     
     return {

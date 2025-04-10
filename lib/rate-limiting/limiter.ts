@@ -1,5 +1,5 @@
-import { Ratelimit } from '@upstash/ratelimit'
-import { redis } from '../redis'
+import { Ratelimit } from '@upstash/ratelimit';
+import { redis } from '../redis';
 
 /**
  * Rate limiting implementation for Ingestion.io
@@ -37,6 +37,20 @@ export const RATE_LIMIT_TIERS = {
 // Define subscription tier types
 export type SubscriptionTier = 'starter' | 'plus' | 'growth'
 
+// Validate tier and provide a fallback to prevent runtime errors
+export function validateTier(tier: string): SubscriptionTier {
+  // Check if the provided tier is a valid key in RATE_LIMIT_TIERS
+  if (tier in RATE_LIMIT_TIERS) {
+    return tier as SubscriptionTier;
+  }
+  
+  // Log the invalid tier for debugging
+  console.warn(`Invalid subscription tier: "${tier}", falling back to "starter"`);
+  
+  // Return the default tier as fallback
+  return "starter";
+}
+
 /**
  * Factory function to create a rate limiter for a specific user and action
  * @param userId The user's ID
@@ -49,7 +63,9 @@ export function createRateLimiter(
   tier: SubscriptionTier,
   action: string
 ) {
-  const limit = RATE_LIMIT_TIERS[tier].requestsPerMinute
+  // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
+  const validTier = validateTier(tier);
+  const limit = RATE_LIMIT_TIERS[validTier].requestsPerMinute;
 
   // Disable analytics when running in test mode
   const isTestMode = process.env.NODE_ENV === 'test' || process.env.VITEST
@@ -74,8 +90,10 @@ export async function checkRateLimit(
   tier: SubscriptionTier,
   action: string
 ) {
-  const limiter = createRateLimiter(userId, tier, action)
-  return await limiter.limit(userId)
+  // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
+  const validTier = validateTier(tier);
+  const limiter = createRateLimiter(userId, validTier, action);
+  return await limiter.limit(userId);
 }
 
 /**
@@ -96,7 +114,9 @@ export const globalRateLimiter = new Ratelimit({
  * @returns True if the batch size is allowed, false otherwise
  */
 export function isBatchSizeAllowed(tier: SubscriptionTier, batchSize: number): boolean {
-  return batchSize <= RATE_LIMIT_TIERS[tier].maxBatchSize
+  // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
+  const validTier = validateTier(tier);
+  return batchSize <= RATE_LIMIT_TIERS[validTier].maxBatchSize;
 }
 
 /**
@@ -106,8 +126,10 @@ export function isBatchSizeAllowed(tier: SubscriptionTier, batchSize: number): b
  * @returns The number of remaining pages
  */
 export function getRemainingPages(tier: SubscriptionTier, pagesUsed: number): number {
-  const pagesLimit = RATE_LIMIT_TIERS[tier].pagesPerMonth
-  return Math.max(0, pagesLimit - pagesUsed)
+  // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
+  const validTier = validateTier(tier);
+  const pagesLimit = RATE_LIMIT_TIERS[validTier].pagesPerMonth;
+  return Math.max(0, pagesLimit - pagesUsed);
 }
 
 /**

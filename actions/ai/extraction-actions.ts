@@ -5,7 +5,7 @@ import { checkUserQuotaAction, incrementPagesProcessedAction } from "@/actions/d
 import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
 import { trackServerEvent } from "@/lib/analytics/server";
 import { getCurrentUser } from "@/lib/auth-utils";
-import { checkRateLimit, createRateLimiter, isBatchSizeAllowed, SubscriptionTier } from "@/lib/rate-limiting/limiter";
+import { checkRateLimit, createRateLimiter, isBatchSizeAllowed, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
 import { enhancePrompt, getDefaultPrompt, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";
@@ -111,7 +111,7 @@ type ResumeData = z.infer<typeof resumeSchema>;
 // Define input validation schema for document extraction
 const extractDocumentSchema = z.object({
   documentId: z.string().uuid(),
-  extractionPrompt: z.string().min(5).max(1000).optional(),
+  extractionPrompt: z.string().min(2).max(1000).optional(),
   includeConfidence: z.boolean().optional().default(true),
   includePositions: z.boolean().optional().default(false),
   documentType: z.string().optional()
@@ -139,7 +139,8 @@ async function applyRateLimiting(userId: string, batchSize: number = 1): Promise
       };
     }
     
-    const tier = (profileResult.data.membership || "starter") as SubscriptionTier;
+    // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
+    const tier = validateTier(profileResult.data.membership || "starter");
     
     // Check if batch size is allowed for the tier
     if (!isBatchSizeAllowed(tier, batchSize)) {
@@ -218,7 +219,7 @@ export async function extractDocumentDataAction(
         message: "Failed to retrieve user profile"
       };
     }
-    const tier = profileResult.data.membership as SubscriptionTier;
+    const tier = validateTier(profileResult.data.membership || "starter");
     
     // 4. Rate Limit Check
     const rateLimitResult = await checkRateLimit(userId, tier, "extraction");
@@ -252,7 +253,7 @@ export async function extractDocumentDataAction(
     }
     
     // 6. Get Document
-    const supabase = createServerClient();
+    const supabase = await createServerClient();
     const { data: document, error: docError } = await supabase
       .from('documents')
       .select('*')
@@ -380,18 +381,7 @@ export async function extractDocumentDataAction(
             },
             {
               role: "user",
-              // @ts-ignore - Type compatibility issue
-              content: [
-                { type: "text", text: enhancedPrompt },
-                { 
-                  type: "image", 
-                  source: {
-                    type: "base64",
-                    media_type: document.mime_type,
-                    data: fileBase64
-                  }
-                }
-              ]
+              content: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}`
             }
           ]
         });
@@ -412,18 +402,7 @@ export async function extractDocumentDataAction(
             },
             {
               role: "user",
-              // @ts-ignore - Type compatibility issue
-              content: [
-                { type: "text", text: enhancedPrompt },
-                { 
-                  type: "image", 
-                  source: {
-                    type: "base64",
-                    media_type: document.mime_type,
-                    data: fileBase64
-                  }
-                }
-              ]
+              content: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}`
             }
           ]
         });
@@ -673,18 +652,7 @@ async function detectDocumentTypeAction(
         },
         {
           role: "user",
-          // @ts-ignore - Type compatibility issue
-          content: [
-            { type: "text", text: "What type of document is this? Respond with only one word." },
-            { 
-              type: "image", 
-              source: {
-                type: "base64",
-                media_type: mimeType,
-                data: fileBase64
-              }
-            }
-          ]
+          content: "What type of document is this? Respond with only one word."
         }
       ]
     });

@@ -1,16 +1,50 @@
 "use client";
 
+import { migrateFreeMembershipsToStarterAction } from "@/actions/db/profiles-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Globe, Database, Lock, Bell, Save, Download, Trash2, AlertTriangle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/use-toast";
+import { AlertTriangle, Bug, Database, Download, Globe, Save, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 export default function SettingsPage() {
+  const [isFixingMemberships, setIsFixingMemberships] = useState(false);
+  
+  const handleFixMemberships = async () => {
+    try {
+      setIsFixingMemberships(true);
+      const result = await migrateFreeMembershipsToStarterAction();
+      
+      if (result.isSuccess) {
+        toast({
+          title: "Success",
+          description: result.message,
+          variant: "default"
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive"
+      });
+    } finally {
+      setIsFixingMemberships(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -26,6 +60,9 @@ export default function SettingsPage() {
           <TabsTrigger value="integration">API & Integrations</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="privacy">Privacy & Data</TabsTrigger>
+          {process.env.NODE_ENV === 'development' && (
+            <TabsTrigger value="debug">Debug</TabsTrigger>
+          )}
         </TabsList>
         
         <TabsContent value="general">
@@ -406,6 +443,52 @@ export default function SettingsPage() {
             </Card>
           </div>
         </TabsContent>
+        
+        {process.env.NODE_ENV === 'development' && (
+          <TabsContent value="debug">
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bug className="h-5 w-5" />
+                  Developer Debug Tools
+                </CardTitle>
+                <CardDescription>
+                  These tools are only available in development mode
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <h3 className="font-medium">Database Fixes</h3>
+                  
+                  <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900/50 p-4">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-500 mt-0.5" />
+                        <div>
+                          <h4 className="font-medium text-amber-800 dark:text-amber-500">Fix Membership Values</h4>
+                          <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+                            This will update all profiles with 'free' membership to use 'starter' instead 
+                            to match the enum values defined in the schema.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="pl-8">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={handleFixMemberships}
+                          disabled={isFixingMemberships}
+                        >
+                          {isFixingMemberships ? "Fixing..." : "Fix Membership Values"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
       
       <div className="flex justify-end gap-2 mt-2">
