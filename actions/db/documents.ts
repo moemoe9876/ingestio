@@ -122,4 +122,84 @@ export async function uploadDocumentAction(
       error: "500"
     }
   }
+}
+
+/**
+ * Deletes a document and its associated file from storage
+ * Requires user authentication and ownership verification
+ */
+export async function deleteDocumentAction(
+  documentId: string
+): Promise<ActionState<void>> {
+  try {
+    // 1. Authentication check
+    const userId = await getCurrentUser()
+
+    // 2. Check if document exists and belongs to the user
+    const supabase = createServerClient()
+    const { data: document, error: fetchError } = await supabase
+      .from("documents")
+      .select("*")
+      .eq("id", documentId)
+      .eq("user_id", userId)
+      .single()
+
+    if (fetchError || !document) {
+      return {
+        isSuccess: false,
+        message: "Document not found or access denied",
+        error: "404"
+      }
+    }
+
+    // 3. Delete the file from storage
+    const { error: storageError } = await supabase.storage
+      .from("documents")
+      .remove([document.storage_path])
+
+    if (storageError) {
+      console.error("Storage deletion error:", storageError)
+      // Continue with database deletion even if storage deletion fails
+      // This prevents orphaned records, and storage cleanup can be done later
+    }
+
+    // 4. Delete the document record from the database
+    // This will trigger cascading deletes for related records
+    const { error: deleteError } = await supabase
+      .from("documents")
+      .delete()
+      .eq("id", documentId)
+      .eq("user_id", userId)
+
+    if (deleteError) {
+      return {
+        isSuccess: false,
+        message: "Failed to delete document",
+        error: deleteError.message
+      }
+    }
+
+    // 5. Track analytics event
+    await trackServerEvent("document_deleted", userId, {
+      document_id: documentId,
+      file_type: document.mime_type,
+      page_count: document.page_count
+    })
+
+    // 6. Revalidate path to update UI
+    revalidatePath("/dashboard/documents")
+
+    return {
+      isSuccess: true,
+      message: "Document deleted successfully",
+      data: undefined
+    }
+  } catch (error) {
+    console.error("Error deleting document:", error)
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Unknown error deleting document",
+      error: "500"
+    }
+  }
 } 
