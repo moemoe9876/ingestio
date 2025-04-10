@@ -265,7 +265,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 3.1, 2.5
     -   **User Instructions**: Apply policies. Test thoroughly.
 
--   [ ] **Step 3.3: Configure Supabase Storage Bucket & Policies**
+-   [x] **Step 3.3: Configure Supabase Storage Bucket & Policies**
     -   **Task**: Create private storage buckets (`documents`, `exports`) and define access policies.
     -   **Files**: None (Supabase Dashboard/SQL)
     -   **Step Dependencies**: 1.4, 3.2

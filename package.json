@@ -24,7 +24,9 @@
     "test": "vitest run",
     "test:db": "RUN_DB_TESTS=true vitest run db",
     "test:rls": "RUN_RLS_TESTS=true vitest run __tests__/rls/*.test.ts",
-    "test:rls:watch": "RUN_RLS_TESTS=true vitest watch __tests__/rls/*.test.ts"
+    "test:rls:watch": "RUN_RLS_TESTS=true vitest watch __tests__/rls/*.test.ts",
+    "test:storage": "RUN_STORAGE_TESTS=true vitest run __tests__/rls/storage.test.ts",
+    "test:storage:watch": "RUN_STORAGE_TESTS=true vitest watch __tests__/rls/storage.test.ts"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "^2.1.29",

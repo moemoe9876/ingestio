@@ -4,10 +4,8 @@ The root server layout for the app.
 </ai_context>
 */
 
-import { PostHogProvider } from "@/components/providers/PostHogProvider"
 import { Toaster } from "@/components/ui/toaster"
-import { PostHogPageview } from "@/components/utilities/posthog/posthog-pageview"
-import { PostHogUserIdentify } from "@/components/utilities/posthog/posthog-user-identity"
+import { PostHogProvider, PostHogUserIdentity } from "@/components/utilities/posthog"
 import { TailwindIndicator } from "@/components/utilities/tailwind-indicator"
 import { ThemeProvider } from "@/components/utilities/theme-provider"
 import { UserInitializer } from "@/components/utilities/user-initializer"
@@ -49,8 +47,7 @@ export default async function RootLayout({
               disableTransitionOnChange
             >
               <UserInitializer />
-              <PostHogUserIdentify />
-              <PostHogPageview />
+              <PostHogUserIdentity />
 
               {children}
 

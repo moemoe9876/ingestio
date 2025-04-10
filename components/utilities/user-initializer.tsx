@@ -1,8 +1,8 @@
 "use client"
 
 import {
-    createProfileAction,
-    getProfileByUserIdAction
+  getProfileAction,
+  getProfileByUserIdAction
 } from "@/actions/db/profiles-actions"
 import { useAuth } from "@clerk/nextjs"
 import { useEffect, useState } from "react"
@@ -17,7 +17,7 @@ export function UserInitializer() {
         try {
           const profileRes = await getProfileByUserIdAction(userId)
           if (!profileRes.isSuccess) {
-            await createProfileAction({ userId })
+            await getProfileAction({ userId })
           }
           setInitialized(true)
         } catch (error) {

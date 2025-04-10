@@ -13,14 +13,14 @@ export interface TestUser {
   email: string;
 }
 
-// Test users for RLS testing
+// Test users for RLS testing with proper UUID format
 export const USER_A: TestUser = {
-  id: "user_123",
+  id: "123e4567-e89b-12d3-a456-426614174000", // Valid UUID v4 format
   email: "user_a@test.com",
 };
 
 export const USER_B: TestUser = {
-  id: "user_456",
+  id: "223e4567-e89b-12d3-a456-426614174001", // Valid UUID v4 format
   email: "user_b@test.com",
 };
 
