@@ -346,7 +346,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 3.1, 3.3, 3.4, 4.1, **4.0 (Rate Limit Check)**, 6.4 (Usage Check), 7.2 (Analytics)
     -   **User Instructions**: Check auth, **check rate limit**, check quota (`user_usage`), upload to Storage, insert into `documents`, update quota usage (`user_usage`), revalidate, redirect, track analytics.
 
--   [ ] **Step 4.3: Implement AI Extraction Action**
+-   [x] **Step 4.3: Implement AI Extraction Action**
     -   **Task**: Create Server Action for AI extraction.
     -   **Files**: `actions/ai/extraction.ts`, `prompts/extraction.ts` (Optional).
     -   **Step Dependencies**: 1.7 (Vertex Client), 3.1, 3.3, 3.4, 4.1, **4.0 (Rate Limit Check)**, 4.4 (Schema Gen - if used), 7.2 (Analytics)
