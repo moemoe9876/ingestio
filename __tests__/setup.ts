@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { beforeEach, vi } from 'vitest';
 
 // Mock Next.js server modules
 vi.mock('server-only', () => ({}));
@@ -13,4 +13,27 @@ vi.mock('crypto', () => ({
 
 // Mock environment variables
 process.env.UPSTASH_REDIS_REST_URL = 'https://test-redis-url.upstash.io';
-process.env.UPSTASH_REDIS_REST_TOKEN = 'test-redis-token'; 
+process.env.UPSTASH_REDIS_REST_TOKEN = 'test-redis-token';
+
+// Mock server-only
+vi.mock("server-only", () => ({}));
+
+// Mock Next.js modules that might cause issues in tests
+vi.mock("next/navigation", () => ({
+  useRouter: vi.fn(() => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+  })),
+  usePathname: vi.fn(() => "/"),
+  useSearchParams: vi.fn(() => new URLSearchParams()),
+  useParams: vi.fn(() => ({})),
+  redirect: vi.fn(),
+}));
+
+// Reset mocks between tests
+beforeEach(() => {
+  vi.clearAllMocks();
+}); 

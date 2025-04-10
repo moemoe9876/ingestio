@@ -1,14 +1,14 @@
 "use server";
 
-import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
-import { checkUserQuotaAction, incrementPagesProcessedAction } from "@/actions/db/user-usage-actions";
-import { getVertexModel, getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
-import { trackApiUsage } from "@/lib/monitoring/rate-limit-monitor";
-import { createRateLimiter, isBatchSizeAllowed, SubscriptionTier } from "@/lib/rate-limiting";
-import { ActionState } from "@/types";
 import { auth } from "@clerk/nextjs/server";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
+import { getProfileByUserIdAction } from "../../actions/db/profiles-actions";
+import { checkUserQuotaAction, incrementPagesProcessedAction } from "../../actions/db/user-usage-actions";
+import { getVertexModel, getVertexStructuredModel, VERTEX_MODELS } from "../../lib/ai/vertex-client";
+import { trackApiUsage } from "../../lib/monitoring/rate-limit-monitor";
+import { createRateLimiter, isBatchSizeAllowed, SubscriptionTier } from "../../lib/rate-limiting";
+import { ActionState } from "../../types";
 
 // Define input validation schema for text extraction
 const extractTextSchema = z.object({
@@ -25,6 +25,86 @@ const extractStructuredDataSchema = z.object({
   extractionPrompt: z.string().min(5).max(1000),
   batchSize: z.number().int().min(1).optional().default(1),
 });
+
+// Sample invoice schema for structured data extraction
+const invoiceSchema = z.object({
+  invoiceNumber: z.string().optional(),
+  date: z.string().optional(),
+  dueDate: z.string().optional(),
+  totalAmount: z.number().optional(),
+  vendor: z.object({
+    name: z.string().optional(),
+    address: z.string().optional(),
+    phone: z.string().optional(),
+    email: z.string().optional(),
+  }).optional(),
+  customer: z.object({
+    name: z.string().optional(),
+    address: z.string().optional(),
+    phone: z.string().optional(),
+    email: z.string().optional(),
+  }).optional(),
+  lineItems: z.array(
+    z.object({
+      description: z.string().optional(),
+      quantity: z.number().optional(),
+      unitPrice: z.number().optional(),
+      totalPrice: z.number().optional(),
+    })
+  ).optional(),
+  confidence: z.number().optional(),
+});
+
+type InvoiceData = z.infer<typeof invoiceSchema>;
+
+// Resume schema for structured data extraction
+const resumeSchema = z.object({
+  personalInfo: z.object({
+    name: z.string().optional(),
+    email: z.string().email().optional(),
+    phone: z.string().optional(),
+    location: z.string().optional(),
+    linkedin: z.string().url().optional(),
+    website: z.string().url().optional(),
+  }).optional(),
+  education: z.array(
+    z.object({
+      institution: z.string().optional(),
+      degree: z.string().optional(),
+      fieldOfStudy: z.string().optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      gpa: z.string().optional(),
+    })
+  ).optional(),
+  workExperience: z.array(
+    z.object({
+      company: z.string().optional(),
+      position: z.string().optional(),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      location: z.string().optional(),
+      description: z.string().optional(),
+    })
+  ).optional(),
+  skills: z.array(z.string()).optional(),
+  certifications: z.array(
+    z.object({
+      name: z.string().optional(),
+      issuer: z.string().optional(),
+      date: z.string().optional(),
+    })
+  ).optional(),
+  languages: z.array(
+    z.object({
+      language: z.string().optional(),
+      proficiency: z.string().optional(),
+    })
+  ).optional(),
+  confidence: z.number().optional(),
+});
+
+type ResumeData = z.infer<typeof resumeSchema>;
 
 /**
  * Apply rate limiting based on user's subscription tier
@@ -179,37 +259,6 @@ export async function extractTextAction(
   }
 }
 
-// Sample invoice schema for structured data extraction
-const invoiceSchema = z.object({
-  invoiceNumber: z.string().optional(),
-  date: z.string().optional(),
-  dueDate: z.string().optional(),
-  totalAmount: z.number().optional(),
-  vendor: z.object({
-    name: z.string().optional(),
-    address: z.string().optional(),
-    phone: z.string().optional(),
-    email: z.string().optional(),
-  }).optional(),
-  customer: z.object({
-    name: z.string().optional(),
-    address: z.string().optional(),
-    phone: z.string().optional(),
-    email: z.string().optional(),
-  }).optional(),
-  lineItems: z.array(
-    z.object({
-      description: z.string().optional(),
-      quantity: z.number().optional(),
-      unitPrice: z.number().optional(),
-      totalPrice: z.number().optional(),
-    })
-  ).optional(),
-  confidence: z.number().optional(),
-});
-
-type InvoiceData = z.infer<typeof invoiceSchema>;
-
 /**
  * Action to extract structured data from a document using Vertex AI
  */
@@ -289,6 +338,89 @@ export async function extractInvoiceDataAction(
     return {
       isSuccess: false,
       message: error instanceof Error ? error.message : "Failed to extract structured data"
+    };
+  }
+}
+
+/**
+ * Action to extract resume data from a document using Vertex AI
+ */
+export async function extractResumeDataAction(
+  input: z.infer<typeof extractStructuredDataSchema>
+): Promise<ActionState<ResumeData>> {
+  // Validate authentication
+  const authResult = await auth();
+  const { userId } = authResult;
+  if (!userId) {
+    return { isSuccess: false, message: "Unauthorized" };
+  }
+
+  try {
+    // Validate input
+    const parsedInput = extractStructuredDataSchema.safeParse(input);
+    if (!parsedInput.success) {
+      return {
+        isSuccess: false,
+        message: `Invalid input: ${parsedInput.error.message}`,
+      };
+    }
+
+    const { documentBase64, mimeType, extractionPrompt, batchSize = 1 } = parsedInput.data;
+
+    // Apply rate limiting
+    const rateLimitResult = await applyRateLimiting(userId, batchSize);
+    if (!rateLimitResult.isAllowed) {
+      return {
+        isSuccess: false,
+        message: rateLimitResult.message || "Rate limit exceeded",
+      };
+    }
+
+    // Get Vertex structured model
+    const model = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH, {
+      temperature: 0.0,  // Very low temperature for deterministic JSON output
+    });
+
+    // Extract structured data from document
+    const result = await generateObject({
+      // @ts-ignore - Type mismatch between AI SDK versions
+      model,
+      schema: resumeSchema,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { 
+              type: "text", 
+              text: extractionPrompt || "Extract all resume details including personal info, education, work experience, skills, certifications, and languages." 
+            },
+            { 
+              type: "file", 
+              data: Buffer.from(documentBase64, "base64"), 
+              mimeType 
+            }
+          ],
+        },
+      ],
+    });
+    
+    // Track API usage (estimate token usage based on response size)
+    const estimatedTokens = Math.ceil(JSON.stringify(result).length / 4);
+    await trackApiUsage(estimatedTokens);
+    
+    // Increment the user's processed pages count
+    await incrementPagesProcessedAction(userId, batchSize);
+
+    return {
+      isSuccess: true,
+      message: "Resume data extracted successfully",
+      data: result.object as ResumeData
+    };
+  } catch (error) {
+    console.error("Error extracting resume data:", error);
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Failed to extract resume data"
     };
   }
 } 

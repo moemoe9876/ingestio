@@ -340,7 +340,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 1.5, 1.4
     -   **User Instructions**: Implement standard action return type and auth checks.
 
--   [ ] **Step 4.2: Implement Document Upload Action**
+-   [x] **Step 4.2: Implement Document Upload Action**
     -   **Task**: Create Server Action for file upload.
     -   **Files**: `actions/db/documents.ts`.
     -   **Step Dependencies**: 3.1, 3.3, 3.4, 4.1, **4.0 (Rate Limit Check)**, 6.4 (Usage Check), 7.2 (Analytics)
