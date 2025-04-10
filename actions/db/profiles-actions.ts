@@ -9,11 +9,19 @@ Contains server actions related to profiles in the DB.
 import { db } from "@/db/db"
 import {
   InsertProfile,
+  membershipEnum,
   profilesTable,
   SelectProfile
 } from "@/db/schema/profiles-schema"
-import { ActionState } from "@/types"
+import { trackServerEvent } from "@/lib/analytics/server"
+import { getCurrentUser } from "@/lib/auth-utils"
+import { ActionState } from "@/types/server-action-types"
 import { eq } from "drizzle-orm"
+
+// Define analytics events constants here since they might not be available in a proper format
+const ANALYTICS_EVENTS = {
+  SUBSCRIPTION_CHANGED: "subscription_changed"
+}
 
 export async function getProfileAction(
   data: InsertProfile
@@ -124,5 +132,72 @@ export async function deleteProfileAction(
   } catch (error) {
     console.error("Error deleting profile:", error)
     return { isSuccess: false, message: "Failed to delete profile" }
+  }
+}
+
+/**
+ * Updates subscription-related fields in a user's profile
+ * Restricted to specific fields related to subscriptions
+ */
+export async function updateSubscriptionProfileAction(
+  userId: string,
+  data: {
+    membership?: typeof membershipEnum.enumValues[number],
+    stripeCustomerId?: string,
+    stripeSubscriptionId?: string
+  }
+): Promise<ActionState<SelectProfile>> {
+  try {
+    // Get current user ID to ensure user can only update their own profile
+    const currentUserId = await getCurrentUser();
+    
+    // Ensure user can only update their own profile
+    if (userId !== currentUserId) {
+      return { 
+        isSuccess: false, 
+        message: "You can only update your own profile"
+      };
+    }
+    
+    // Only extract allowed fields to prevent modifying sensitive data
+    const allowedData: Partial<InsertProfile> = {};
+    
+    if (data.membership) allowedData.membership = data.membership;
+    if (data.stripeCustomerId) allowedData.stripeCustomerId = data.stripeCustomerId;
+    if (data.stripeSubscriptionId) allowedData.stripeSubscriptionId = data.stripeSubscriptionId;
+    
+    // Update the profile
+    const [updatedProfile] = await db
+      .update(profilesTable)
+      .set(allowedData)
+      .where(eq(profilesTable.userId, userId))
+      .returning();
+    
+    if (!updatedProfile) {
+      return { isSuccess: false, message: "Profile not found" };
+    }
+    
+    // Track the profile update for analytics
+    await trackServerEvent(
+      ANALYTICS_EVENTS.SUBSCRIPTION_CHANGED,
+      userId,
+      { 
+        membership: data.membership,
+        hasStripeCustomerId: !!data.stripeCustomerId,
+        hasStripeSubscriptionId: !!data.stripeSubscriptionId
+      }
+    );
+    
+    return {
+      isSuccess: true,
+      message: "Subscription profile updated successfully",
+      data: updatedProfile
+    };
+  } catch (error) {
+    console.error("Error updating subscription profile:", error);
+    return { 
+      isSuccess: false, 
+      message: "Failed to update subscription profile"
+    };
   }
 }
