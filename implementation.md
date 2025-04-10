@@ -352,19 +352,19 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     -   **Step Dependencies**: 1.7 (Vertex Client), 3.1, 3.3, 3.4, 4.1, **4.0 (Rate Limit Check)**, 4.4 (Schema Gen - if used), 7.2 (Analytics)
     -   **User Instructions**: Check auth, **check rate limit**, fetch doc, prepare prompt, call Vertex (`generateObject`), save result to `extracted_data`, update `documents` status, track analytics.
 
--   [ ] **Step 4.4: Implement Schema Generation Action**
+-   [x] **Step 4.4: Implement Schema Generation Action**
     -   **Task**: Create Server Action for schema generation.
     -   **Files**: `actions/ai/schema.ts`, `prompts/schemaGen.ts` (Optional).
     -   **Step Dependencies**: 1.7, 4.1, **4.0 (Rate Limit Check)**, 7.2
     -   **User Instructions**: Check auth, **check rate limit**, call Vertex.
 
--   [ ] **Step 4.5: Implement Document Deletion Action**
+-   [x] **Step 4.5: Implement Document Deletion Action**
     -   **Task**: Create Server Action for document deletion.
     -   **Files**: `actions/db/documents.ts`.
     -   **Step Dependencies**: 3.1, 3.4, 4.1, 7.2
     -   **User Instructions**: Check auth/ownership, delete DB record (`documents`, cascade should handle `extraction_jobs`, `extracted_data`), delete Storage file(s).
 
--   [ ] **Step 4.6: Implement Profile/Settings Update Actions**
+-   [x] **Step 4.6: Implement Profile/Settings Update Actions**
     -   **Task**: Create Server Actions for user profile/settings. **Note: Profile action only updates `profiles` (membership/stripe), User action updates `users` (name/avatar).**
     -   **Files**: `actions/db/profile.ts` (`updateSubscriptionProfileAction`), `actions/db/users.ts` (`updateUserIdentityAction`).
     -   **Step Dependencies**: 3.1, 3.4, 4.1, 7.2

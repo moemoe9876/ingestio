@@ -21,26 +21,39 @@ const mockSelect = vi.fn();
 const mockDelete = vi.fn();
 const mockSingle = vi.fn();
 const mockEq = vi.fn();
+const mockCreateSignedUrl = vi.fn();
+const mockSelectAll = vi.fn(() => ({ eq: mockSelectAll, order: mockSelectAll, limit: mockSelectAll, maybeSingle: mockMaybeSingle }));
+const mockMaybeSingle = vi.fn();
 
 vi.mock('@/lib/supabase/server', () => ({
   createServerClient: vi.fn(() => ({
-    from: vi.fn(() => ({
-      select: () => ({
-        eq: () => ({
-          eq: () => ({
-            single: mockSingle
+    from: vi.fn((table) => {
+      if (table === 'documents') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                single: mockSingle
+              })
+            })
+          }),
+          delete: () => ({
+            eq: () => ({
+              eq: mockEq
+            })
           })
-        })
-      }),
-      delete: () => ({
-        eq: () => ({
-          eq: mockEq
-        })
-      })
-    })),
+        };
+      } else if (table === 'extracted_data') {
+        return {
+          select: mockSelectAll
+        };
+      }
+      return { select: () => ({}) };
+    }),
     storage: {
       from: vi.fn(() => ({
-        remove: mockRemove
+        remove: mockRemove,
+        createSignedUrl: mockCreateSignedUrl
       }))
     }
   }))
@@ -52,7 +65,7 @@ vi.mock('@/lib/analytics/server', () => ({
 }));
 
 // Import after mocks are set up
-import { deleteDocumentAction } from '@/actions/db/documents';
+import { deleteDocumentAction, fetchDocumentForReviewAction } from '@/actions/db/documents';
 import { getCurrentUser } from '@/lib/auth-utils';
 
 describe('Document Actions', () => {
@@ -79,6 +92,8 @@ describe('Document Actions', () => {
     mockSingle.mockResolvedValue({ data: mockDocument, error: null });
     mockRemove.mockResolvedValue({ error: null });
     mockEq.mockResolvedValue({ error: null });
+    mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://example.com/signed-url' }, error: null });
+    mockMaybeSingle.mockResolvedValue({ data: null, error: null });
   });
 
   describe('deleteDocumentAction', () => {
@@ -123,6 +138,67 @@ describe('Document Actions', () => {
       vi.mocked(getCurrentUser).mockRejectedValueOnce(new Error('Unauthorized'));
       
       const result = await deleteDocumentAction(mockDocumentId);
+      
+      expect(result.isSuccess).toBe(false);
+      expect(result.message).toBe('Unauthorized');
+    });
+  });
+
+  describe('fetchDocumentForReviewAction', () => {
+    const mockExtractedData = {
+      id: randomUUID(),
+      document_id: mockDocumentId,
+      user_id: mockUserId,
+      data: { key: 'value' },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    beforeEach(() => {
+      mockCreateSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://example.com/signed-url' }, error: null });
+      mockMaybeSingle.mockResolvedValue({ data: mockExtractedData, error: null });
+    });
+
+    test('successfully fetches document with signed URL and extracted data', async () => {
+      const result = await fetchDocumentForReviewAction(mockDocumentId);
+      
+      expect(result.isSuccess).toBe(true);
+      expect((result as { data: { document: any; signedUrl: string; extractedData: any } }).data.document.id).toBe(mockDocumentId);
+      expect((result as { data: { document: any; signedUrl: string; extractedData: any } }).data.signedUrl).toBe('https://example.com/signed-url');
+      expect((result as { data: { document: any; signedUrl: string; extractedData: any } }).data.extractedData).toEqual(mockExtractedData.data);
+    });
+
+    test('returns error when document not found', async () => {
+      mockSingle.mockResolvedValueOnce({ data: null, error: { message: 'Not found' } });
+      
+      const result = await fetchDocumentForReviewAction(mockDocumentId);
+      
+      expect(result.isSuccess).toBe(false);
+      expect(result.message).toBe('Document not found or access denied');
+    });
+
+    test('returns error when signed URL generation fails', async () => {
+      mockCreateSignedUrl.mockResolvedValueOnce({ data: null, error: { message: 'Failed to generate URL' } });
+      
+      const result = await fetchDocumentForReviewAction(mockDocumentId);
+      
+      expect(result.isSuccess).toBe(false);
+      expect(result.message).toBe('Failed to generate document access URL');
+    });
+
+    test('continues without extracted data when not found', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+      
+      const result = await fetchDocumentForReviewAction(mockDocumentId);
+      
+      expect(result.isSuccess).toBe(true);
+      expect((result as { data: { extractedData: any | null } }).data.extractedData).toBeNull();
+    });
+
+    test('returns error when user is not authenticated', async () => {
+      vi.mocked(getCurrentUser).mockRejectedValueOnce(new Error('Unauthorized'));
+      
+      const result = await fetchDocumentForReviewAction(mockDocumentId);
       
       expect(result.isSuccess).toBe(false);
       expect(result.message).toBe('Unauthorized');

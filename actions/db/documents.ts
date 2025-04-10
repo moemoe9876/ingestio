@@ -202,4 +202,106 @@ export async function deleteDocumentAction(
       error: "500"
     }
   }
+}
+
+/**
+ * Fetches document data for review, including metadata, a signed URL for the document,
+ * and any associated extracted data
+ */
+export async function fetchDocumentForReviewAction(
+  documentId: string
+): Promise<ActionState<{
+  document: SelectDocument;
+  signedUrl: string;
+  extractedData: any | null;
+}>> {
+  try {
+    // 1. Authentication check
+    const userId = await getCurrentUser()
+
+    // 2. Fetch document data and verify ownership
+    const supabase = createServerClient()
+    const { data: documentData, error: documentError } = await supabase
+      .from("documents")
+      .select("*")
+      .eq("id", documentId)
+      .eq("user_id", userId)
+      .single()
+
+    if (documentError || !documentData) {
+      return {
+        isSuccess: false,
+        message: "Document not found or access denied",
+        error: "404"
+      }
+    }
+
+    // Map database fields to our schema types
+    const document: SelectDocument = {
+      id: documentData.id,
+      userId: documentData.user_id,
+      originalFilename: documentData.original_filename,
+      storagePath: documentData.storage_path,
+      mimeType: documentData.mime_type,
+      fileSize: documentData.file_size,
+      pageCount: documentData.page_count,
+      status: documentData.status,
+      createdAt: new Date(documentData.created_at),
+      updatedAt: new Date(documentData.updated_at)
+    }
+
+    // 3. Generate signed URL for the document
+    const { data: signedUrlData, error: signedUrlError } = await supabase
+      .storage
+      .from("documents")
+      .createSignedUrl(document.storagePath, 60 * 30) // 30 minutes expiry
+
+    if (signedUrlError || !signedUrlData) {
+      console.error("Error generating signed URL:", signedUrlError)
+      return {
+        isSuccess: false,
+        message: "Failed to generate document access URL",
+        error: signedUrlError?.message || "Unknown error"
+      }
+    }
+
+    // 4. Fetch associated extracted data if available
+    const { data: extractedData, error: extractedDataError } = await supabase
+      .from("extracted_data")
+      .select("*")
+      .eq("document_id", documentId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (extractedDataError) {
+      console.error("Error fetching extracted data:", extractedDataError)
+      // Continue without extracted data - it might not exist yet
+    }
+
+    // 5. Track analytics event
+    await trackServerEvent("document_viewed", userId, {
+      document_id: documentId,
+      file_type: document.mimeType,
+      has_extracted_data: !!extractedData
+    })
+
+    return {
+      isSuccess: true,
+      message: "Document data fetched successfully",
+      data: {
+        document,
+        signedUrl: signedUrlData.signedUrl,
+        extractedData: extractedData?.data || null
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching document data:", error)
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Unknown error fetching document data",
+      error: "500"
+    }
+  }
 } 
