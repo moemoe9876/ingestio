@@ -45,9 +45,11 @@ interface DataVisualizerProps {
   data: any;
   onHighlight?: (highlight: HighlightRect | null) => void;
   onSelect?: (path: string, value: any) => void;
+  onEdit?: (path: string, newValue: string | number) => void;
   className?: string;
   selectedFieldPath?: string | null;
   confidenceThreshold?: number;
+  editMode?: boolean;
   options?: {
     includePositions?: boolean;
   };
@@ -168,9 +170,11 @@ export function DataVisualizer({
   data, 
   onHighlight, 
   onSelect,
+  onEdit,
   className,
   selectedFieldPath = null,
   confidenceThreshold = 0,
+  editMode = false,
   options = { includePositions: true }
 }: DataVisualizerProps) {
   const [viewMode, setViewMode] = useState<"tree" | "json">("tree");
@@ -343,6 +347,13 @@ export function DataVisualizer({
     }
   };
   
+  // Add a new function to handle editing fields
+  const handleFieldEdit = (path: string, value: string | number) => {
+    if (onEdit) {
+      onEdit(path, value);
+    }
+  };
+  
   // Recursive renderer for nested data structures
   const renderField = (key: string, data: any, path: string) => {
     if (!data) return null;
@@ -387,7 +398,9 @@ export function DataVisualizer({
                       path={`${path}[${index}]`}
                       onHover={handleFieldHover}
                       onSelect={onSelect}
+                      onEdit={editMode && onEdit ? handleFieldEdit : undefined}
                       showPositionInfo={options.includePositions !== false}
+                      isEditable={editMode}
                       className={`${path}[${index}]` === selectedFieldPath ? "bg-primary/20 border border-primary" : ""}
                     />
                   ) : (
@@ -407,7 +420,9 @@ export function DataVisualizer({
                               path={`${path}[${index}].${itemKey}`}
                               onHover={handleFieldHover}
                               onSelect={onSelect}
+                              onEdit={editMode && onEdit ? handleFieldEdit : undefined}
                               showPositionInfo={options.includePositions !== false}
+                              isEditable={editMode}
                               className={`${path}[${index}].${itemKey}` === selectedFieldPath ? "bg-primary/20 border border-primary" : ""}
                             />
                           ) : (
@@ -440,7 +455,9 @@ export function DataVisualizer({
           path={path}
           onHover={handleFieldHover}
           onSelect={onSelect}
+          onEdit={editMode && onEdit ? handleFieldEdit : undefined}
           showPositionInfo={options.includePositions !== false}
+          isEditable={editMode}
           className={cn(
             path === selectedFieldPath ? "bg-primary/20 border border-primary" : "",
             "mb-2"

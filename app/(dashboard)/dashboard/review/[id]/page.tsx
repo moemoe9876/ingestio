@@ -106,6 +106,7 @@ export default function ReviewPage({ params }: PageProps) {
   const [includeMetadata, setIncludeMetadata] = useState(true);
   const [currentHighlight, setCurrentHighlight] = useState<HighlightRect | null>(null);
   const [selectedFieldPath, setSelectedFieldPath] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Listen for sidebar toggle events
   useEffect(() => {
@@ -384,6 +385,75 @@ export default function ReviewPage({ params }: PageProps) {
     }
   };
 
+  // Function to handle field editing in DataVisualizer
+  const handleFieldEdit = (path: string, newValue: string | number) => {
+    if (!editMode || !extractedData) return;
+    
+    // Create a deep copy of the data
+    const updatedData = JSON.parse(JSON.stringify(extractedData));
+    
+    // Helper function to find and update the nested field
+    const updateNestedField = (obj: any, pathParts: string[]): boolean => {
+      const current = pathParts[0];
+      
+      // Handle array notation like path[0]
+      const arrayMatch = current.match(/(\w+)\[(\d+)\]/);
+      if (arrayMatch) {
+        const [_, arrayName, indexStr] = arrayMatch;
+        const index = parseInt(indexStr, 10);
+        
+        if (!obj[arrayName] || !Array.isArray(obj[arrayName]) || !obj[arrayName][index]) {
+          return false;
+        }
+        
+        if (pathParts.length === 1) {
+          if (typeof obj[arrayName][index] === 'object' && 'value' in obj[arrayName][index]) {
+            obj[arrayName][index].value = newValue;
+            return true;
+          }
+          obj[arrayName][index] = newValue;
+          return true;
+        }
+        
+        return updateNestedField(obj[arrayName][index], pathParts.slice(1));
+      }
+      
+      // Handle regular object properties
+      if (!(current in obj)) {
+        return false;
+      }
+      
+      if (pathParts.length === 1) {
+        if (typeof obj[current] === 'object' && 'value' in obj[current]) {
+          obj[current].value = newValue;
+          return true;
+        }
+        obj[current] = newValue;
+        return true;
+      }
+      
+      return updateNestedField(obj[current], pathParts.slice(1));
+    };
+    
+    // Split the path by dots, but handle array notation
+    const pathParts = path.split(/\.(?![^\[]*\])/);
+    
+    if (updateNestedField(updatedData, pathParts)) {
+      setExtractedData(updatedData);
+      toast({
+        title: "Field Updated",
+        description: `Updated ${path.split('.').pop()?.replace(/_/g, ' ')}`,
+        variant: "default",
+      });
+    } else {
+      toast({
+        title: "Update Failed",
+        description: `Could not update the field at path: ${path}`,
+        variant: "destructive",
+      });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center w-full h-full min-h-[500px] space-y-4">
@@ -434,7 +504,26 @@ export default function ReviewPage({ params }: PageProps) {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold tracking-tight">Document Review</h1>
         
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-4">
+          {/* Confidence threshold filter */}
+          <div className="flex items-center gap-2">
+            <Label htmlFor="confidence-filter" className="text-sm">
+              Confidence Threshold: {confidenceThreshold * 100}%
+            </Label>
+            <input
+              id="confidence-filter"
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={confidenceThreshold}
+              onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
+              className="w-32"
+              title={`Set confidence threshold to ${confidenceThreshold * 100}%`}
+            />
+          </div>
+          
+          {/* Edit mode toggle */}
           <Button
             variant={editMode ? "default" : "outline"}
             size="sm"
@@ -461,8 +550,10 @@ export default function ReviewPage({ params }: PageProps) {
               data={extractedData}
               onHighlight={handleHighlight}
               onSelect={handleFieldSelect}
+              onEdit={handleFieldEdit}
               selectedFieldPath={selectedFieldPath}
               confidenceThreshold={confidenceThreshold}
+              editMode={editMode}
               options={{ includePositions: true }}
               className="h-full"
             />
