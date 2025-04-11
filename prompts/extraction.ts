@@ -83,6 +83,8 @@ export function enhancePrompt(
   includeConfidence: boolean = true,
   includePositions: boolean = false
 ): string {
+  console.log("[PROMPT DEBUG] Original user prompt:", userPrompt);
+  
   let enhancedPrompt = userPrompt.trim();
 
   // Add JSON structure guidance if not already present
@@ -99,6 +101,13 @@ export function enhancePrompt(
   if (includePositions && !enhancedPrompt.toLowerCase().includes('position')) {
     enhancedPrompt += ' Include position data (page number and bounding box coordinates) for each extracted field.';
   }
+  
+  // Add strict instruction to follow the prompt exactly
+  if (!enhancedPrompt.toLowerCase().includes('only') && !enhancedPrompt.toLowerCase().includes('exactly')) {
+    enhancedPrompt += ' Extract ONLY the information specified in this prompt and nothing else.';
+  }
+  
+  console.log("[PROMPT DEBUG] Enhanced prompt:", enhancedPrompt);
   
   return enhancedPrompt;
 }
@@ -121,4 +130,177 @@ export function getDefaultPrompt(documentType?: string): string {
     default:
       return DEFAULT_TEXT_EXTRACTION_PROMPT;
   }
+}
+
+/**
+ * Parses the user prompt to identify specifically requested fields
+ * @param prompt - The user's extraction prompt
+ * @returns Array of requested field names, or null if the prompt is generic
+ */
+export function parseRequestedFields(prompt: string): string[] | null {
+  if (!prompt) return null;
+  
+  const normalizedPrompt = prompt.toLowerCase();
+  
+  // Skip parsing for generic prompts
+  if (
+    normalizedPrompt.includes("extract all") || 
+    normalizedPrompt.includes("extract everything") ||
+    normalizedPrompt.includes("extract any")
+  ) {
+    console.log("[PROMPT PARSER] Generic extraction detected, no field filtering needed");
+    return null;
+  }
+  
+  const fieldPatterns = [
+    // Pattern: "Extract [field1], [field2] and [field3]"
+    /extract\s+(?:the\s+)?(?:following|)?\s*(?:information|data|fields|)?\s*(?::|)?\s*([^\.]+)/i,
+    
+    // Pattern: numbered or bulleted lists
+    /(?:extract|get|find|identify)[^:]*:([^:]+?)(?:\.|$)/i,
+    
+    // Fallback pattern for explicit extraction requests
+    /(?:extract|get|find|identify)[^:]*?(?:the|)\s+([a-z0-9\s,]+?)(?:from|in|of|and)/i
+  ];
+  
+  let fieldsText: string | null = null;
+  
+  // Try each pattern until we find a match
+  for (const pattern of fieldPatterns) {
+    const match = prompt.match(pattern);
+    if (match && match[1]) {
+      fieldsText = match[1].trim();
+      break;
+    }
+  }
+  
+  if (!fieldsText) {
+    console.log("[PROMPT PARSER] No specific fields detected in prompt:", prompt);
+    return null;
+  }
+  
+  // Extract fields from the matched text
+  const fields: string[] = [];
+  
+  // Check for numbered or bulleted list format
+  if (/\d+\.\s+/.test(fieldsText)) {
+    // Handle numbered list
+    const listItems = fieldsText.split(/\d+\.\s+/).filter(Boolean);
+    for (const item of listItems) {
+      const trimmed = item.replace(/\([^)]*\)/g, '').trim();
+      if (trimmed) fields.push(trimmed.toLowerCase());
+    }
+  } else if (/[-•*]\s+/.test(fieldsText)) {
+    // Handle bulleted list
+    const listItems = fieldsText.split(/[-•*]\s+/).filter(Boolean);
+    for (const item of listItems) {
+      const trimmed = item.replace(/\([^)]*\)/g, '').trim();
+      if (trimmed) fields.push(trimmed.toLowerCase());
+    }
+  } else {
+    // Handle comma-separated or "and" separated list
+    const items = fieldsText
+      .replace(/\s+and\s+/g, ',')
+      .replace(/\s+or\s+/g, ',')
+      .split(',')
+      .map(item => item.replace(/\([^)]*\)/g, '').trim().toLowerCase())
+      .filter(Boolean);
+    
+    fields.push(...items);
+  }
+  
+  // Clean up field names
+  const cleanedFields = fields.map(field => {
+    return field
+      .replace(/^the\s+/i, '')
+      .replace(/\s+/g, '_')
+      .replace(/[^\w_]/g, '');
+  });
+  
+  console.log("[PROMPT PARSER] Extracted fields:", cleanedFields);
+  return cleanedFields.length > 0 ? cleanedFields : null;
+}
+
+/**
+ * Filters extracted data to include only fields that were specifically requested
+ * @param data - The extracted data from the AI
+ * @param requestedFields - Array of field names requested by the user
+ * @returns Filtered data containing only requested fields
+ */
+export function filterExtractedData(data: any, requestedFields: string[] | null): any {
+  // If no specific fields were requested, return all data
+  if (!requestedFields || requestedFields.length === 0) {
+    return data;
+  }
+  
+  console.log("[DATA FILTER] Filtering extraction to include only:", requestedFields);
+  
+  // If data is not an object, return as is
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+  
+  const result: Record<string, any> = {};
+  
+  // Function to normalize keys for comparison
+  const normalizeKey = (key: string): string => {
+    return key.toLowerCase().replace(/\s+/g, '_').replace(/[^\w_]/g, '');
+  };
+  
+  // Create a map of normalized requested fields for lookup
+  const normalizedFields = new Set(requestedFields.map(normalizeKey));
+  
+  // First pass - check for exact matches
+  for (const key in data) {
+    const normalizedKey = normalizeKey(key);
+    if (normalizedFields.has(normalizedKey)) {
+      result[key] = data[key];
+    } else if (key === 'line_items' && 
+              (normalizedFields.has('line_items') || 
+               normalizedFields.has('items') || 
+               normalizedFields.has('products'))) {
+      // Special handling for line items/products
+      result[key] = data[key];
+    }
+  }
+  
+  // Special handling for fields that might be mapped differently
+  // Check for name variations if main fields weren't found
+  const fieldMappings: Record<string, string[]> = {
+    'line_items': ['items', 'products', 'line_items', 'services', 'line'],
+    'total': ['total_amount', 'amount', 'price', 'sum', 'cost'],
+    'name': ['full_name', 'customer_name', 'person_name', 'contact_name']
+  };
+  
+  // Add any missing fields based on synonyms
+  for (const requestedField of requestedFields) {
+    const normalizedRequest = normalizeKey(requestedField);
+    
+    // Skip if already added
+    if (Object.keys(result).some(k => normalizeKey(k) === normalizedRequest)) {
+      continue;
+    }
+    
+    // Check various mappings
+    for (const [dataKey, synonyms] of Object.entries(fieldMappings)) {
+      if (synonyms.includes(normalizedRequest) && data[dataKey]) {
+        result[dataKey] = data[dataKey];
+        break;
+      }
+    }
+    
+    // Do fuzzy matching as last resort
+    if (!Object.keys(result).some(k => normalizeKey(k) === normalizedRequest)) {
+      for (const key in data) {
+        if (normalizeKey(key).includes(normalizedRequest) || 
+            normalizedRequest.includes(normalizeKey(key))) {
+          result[key] = data[key];
+          break;
+        }
+      }
+    }
+  }
+  
+  console.log("[DATA FILTER] Filtered data contains fields:", Object.keys(result));
+  return Object.keys(result).length > 0 ? result : data;
 } 

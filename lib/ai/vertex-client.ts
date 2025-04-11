@@ -10,12 +10,34 @@ console.log(`Vertex AI Configuration:
 - Location: ${location}
 `);
 
+/**
+ * AUTHENTICATION STRATEGY
+ * ======================
+ * 
+ * This section implements a priority-based credential handling system for Google Vertex AI.
+ * In serverless environments like Vercel, proper authentication is critical since we don't
+ * have persistent filesystem access in production.
+ * 
+ * The authentication process follows this priority order:
+ * 1. Direct service account credentials via environment variables (most reliable for serverless)
+ * 2. JSON credentials string (alternative approach)
+ * 3. Credentials file path (works locally, not in serverless production)
+ * 4. Application Default Credentials (ADC) as fallback
+ * 
+ * This approach solves the common "Permission denied" errors that occur when Cloud Functions
+ * or serverless environments try to use the default compute service account which lacks
+ * the necessary Vertex AI permissions.
+ */
+
 // Parse credentials from environment if available
 let googleAuthOptions = undefined;
 
 // Priority 1: Check for direct client_email and private_key environment variables
+// This is the RECOMMENDED approach for serverless environments like Vercel
 if (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
   try {
+    // NOTE: The private_key from Google contains actual newlines, but environment
+    // variables typically encode these as \n, so we need to replace them
     googleAuthOptions = {
       credentials: {
         client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -29,6 +51,7 @@ if (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
   }
 } 
 // Priority 2: Check for JSON credentials string
+// This is useful when you want to store the entire credentials JSON as a single environment variable
 else if (process.env.GOOGLE_CREDENTIALS) {
   try {
     const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
@@ -40,10 +63,13 @@ else if (process.env.GOOGLE_CREDENTIALS) {
   }
 } 
 // Priority 3: Check for credentials file path
+// This works for local development but NOT in serverless environments like Vercel
 else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
   console.log(`Using Google credentials from GOOGLE_APPLICATION_CREDENTIALS path: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`);
   // Default behavior will use the file path, no need to set options explicitly
 } else {
+  // Priority 4: Fall back to Application Default Credentials
+  // This relies on the environment's default service account, which may not have Vertex AI permissions
   console.warn("⚠️ No Google credentials found in environment variables. Attempting default ADC.");
   console.warn("⚠️ This may cause authentication errors if ADC is not configured.");
 }
@@ -68,6 +94,10 @@ const debugMode = process.env.VERTEX_DEBUG === 'true';
 /**
  * Create and configure the Vertex AI provider instance
  * This is the main entry point for interacting with Google Vertex AI
+ * 
+ * IMPORTANT: The googleAuthOptions object is passed here to ensure we're using
+ * our custom service account with Vertex AI permissions instead of the default
+ * compute service account which may lack necessary permissions.
  */
 export const vertex = createVertex({
   project,

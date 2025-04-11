@@ -21,13 +21,6 @@ enum UploadStage {
   ERROR = "error"
 }
 
-interface ExtractionOptions {
-  includeConfidence: boolean;
-  includePositions: boolean;
-  detectDocumentType: boolean;
-  temperature: number;
-}
-
 // Add this utility function to convert a File to base64
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise<string>((resolve, reject) => {
@@ -43,12 +36,6 @@ export default function UploadPage() {
   const { toast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [extractionPrompt, setExtractionPrompt] = useState<string>("");
-  const [extractionOptions, setExtractionOptions] = useState<ExtractionOptions>({
-    includeConfidence: true,
-    includePositions: false,
-    detectDocumentType: true,
-    temperature: 0.1
-  });
   const [isPending, startTransition] = useTransition();
   const [uploadStage, setUploadStage] = useState<UploadStage>(UploadStage.UPLOAD);
   const [progress, setProgress] = useState(0);
@@ -59,11 +46,8 @@ export default function UploadPage() {
     setFile(selectedFile);
   };
 
-  const handlePromptChange = (prompt: string, options?: ExtractionOptions) => {
+  const handlePromptChange = (prompt: string) => {
     setExtractionPrompt(prompt);
-    if (options && Object.keys(options).length > 0) {
-      setExtractionOptions(options);
-    }
   };
 
   // Simulate progress updates during processing
@@ -147,9 +131,8 @@ export default function UploadPage() {
             const extractionResult = await extractDocumentDataAction({
               documentId: uploadResult.data.id,
               extractionPrompt: extractionPrompt,
-              includeConfidence: extractionOptions.includeConfidence,
-              includePositions: extractionOptions.includePositions,
-              documentType: extractionOptions.detectDocumentType ? undefined : "unknown"
+              includeConfidence: true,
+              includePositions: true
             });
             
             if (!extractionResult.isSuccess) {

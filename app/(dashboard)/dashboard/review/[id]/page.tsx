@@ -1,35 +1,10 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
-import React from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { fetchDocumentForReviewAction, updateExtractedDataAction } from "@/actions/db/documents";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  AlertCircle, 
-  Check, 
-  Download, 
-  Edit, 
-  Eye, 
-  FileText, 
-  Save, 
-  ZoomIn, 
-  ZoomOut,
-  RotateCw,
-  Trash2,
-  Plus,
-  AlertTriangle
-} from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -47,13 +23,27 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import PdfViewer from "@/components/PdfViewer";
-import PdfViewerUrl from "@/components/PdfViewerUrl";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/use-toast";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ResizablePanels } from "@/components/ResizablePanels";
-import { DataVisualizer } from "@/components/DataVisualizer";
-import DocumentViewer from "@/components/DocumentViewer";
+import { DataVisualizer } from "@/components/utilities/DataVisualizer";
+import DocumentViewer from "@/components/utilities/DocumentViewer";
+import { ResizablePanels } from "@/components/utilities/ResizablePanels";
+import {
+  AlertCircle,
+  Check,
+  Download,
+  Edit,
+  Eye,
+  FileText,
+  Loader2,
+  RotateCw
+} from "lucide-react";
+import { useEffect, useState } from "react";
 
 interface PageProps {
   params: {
@@ -87,8 +77,10 @@ interface ExtractionMetadata {
   model: string;
   prompt: string;
   processingTimeMs: number;
+  jobId?: string;
   options?: {
     includePositions?: boolean;
+    includeConfidence?: boolean;
   };
 }
 
@@ -102,6 +94,8 @@ export default function ReviewPage({ params }: PageProps) {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
   const [extractionMetadata, setExtractionMetadata] = useState<ExtractionMetadata | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -141,32 +135,57 @@ export default function ReviewPage({ params }: PageProps) {
     const fetchDocumentData = async () => {
       try {
         setIsLoading(true);
+        setHasError(false);
+        setErrorMessage(null);
         
         if (!documentId) {
           throw new Error("Invalid document ID");
         }
         
-        const response = await fetch(`/api/documents/${documentId}`);
+        console.log("[UI DEBUG] Fetching document data for ID:", documentId);
         
-        if (!response.ok) {
-          throw new Error("Failed to fetch document data");
+        // Use the server action to fetch document data
+        const result = await fetchDocumentForReviewAction(documentId);
+        
+        if (!result.isSuccess || !result.data) {
+          throw new Error(result.message || "Failed to fetch document data");
         }
         
-        const data = await response.json();
+        const { document, signedUrl, extractedData: docData } = result.data;
         
-        if (!data || !data.extractedData) {
+       
+        console.log("[UI DEBUG] Extraction metadata:", docData.metadata);
+        console.log("[UI DEBUG] Extracted data structure:", Object.keys(docData.data || docData));
+        
+        // Add more detailed logging to see what's coming from the backend
+        if (docData.data) {
+          console.log("[UI DEBUG] Extracted data content sample:", 
+            JSON.stringify(docData.data).slice(0, 1000) + (JSON.stringify(docData.data).length > 1000 ? '...' : ''));
+        } else if (typeof docData === 'object') {
+          console.log("[UI DEBUG] Extracted data content sample:", 
+            JSON.stringify(docData).slice(0, 1000) + (JSON.stringify(docData).length > 1000 ? '...' : ''));
+        }
+        
+        if (!docData) {
           throw new Error("No extracted data found");
         }
         
-        setExtractedData(data.extractedData);
-        setExtractionMetadata(data.metadata);
-        setFileName(data.fileName);
-        setPdfUrl(`/api/documents/${documentId}/file`);
+        setExtractedData(docData.data || docData);
+        setExtractionMetadata(docData.metadata || {
+          timestamp: document.updatedAt || document.createdAt,
+          model: "gemini-2.0-flash-001",
+          prompt: "",
+          processingTimeMs: 0
+        });
+        setFileName(document.originalFilename);
+        setPdfUrl(signedUrl);
       } catch (error) {
         console.error("Error fetching document data:", error);
+        setHasError(true);
+        setErrorMessage(error instanceof Error ? error.message : "Failed to fetch document data");
         toast({
           title: "Error",
-          description: "Failed to fetch document data. Please try again.",
+          description: error instanceof Error ? error.message : "Failed to fetch document data. Please try again.",
           variant: "destructive",
         });
       } finally {
@@ -179,20 +198,18 @@ export default function ReviewPage({ params }: PageProps) {
 
   const handleConfirm = async () => {
     try {
-      // Save the data to the backend
-      const response = await fetch(`/api/documents/${documentId}/update`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          extractedData,
+      // Save the data to the backend using the server action
+      const result = await updateExtractedDataAction(
+        documentId,
+        extractionMetadata?.jobId || documentId, // Use jobId if available, fall back to documentId
+        {
+          data: extractedData,
           metadata: extractionMetadata
-        }),
-      });
+        }
+      );
       
-      if (!response.ok) {
-        throw new Error("Failed to save data");
+      if (!result.isSuccess) {
+        throw new Error(result.message || "Failed to save data");
       }
       
       setEditMode(false);
@@ -207,7 +224,7 @@ export default function ReviewPage({ params }: PageProps) {
       console.error("Error confirming document:", error);
       toast({
         title: "Error",
-        description: "Failed to confirm document data. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to confirm document data. Please try again.",
         variant: "destructive",
       });
     }
@@ -379,14 +396,30 @@ export default function ReviewPage({ params }: PageProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[80vh]">
-        <div className="flex flex-col items-center gap-4">
-          <RotateCw className="h-8 w-8 animate-spin text-primary" />
-          <h3 className="text-lg font-medium">Loading document data...</h3>
-          <p className="text-sm text-muted-foreground">
-            Preparing your document for review
-          </p>
-        </div>
+      <div className="flex flex-col items-center justify-center w-full h-full min-h-[500px] space-y-4">
+        <Loader2 className="w-10 h-10 text-primary animate-spin" />
+        <p className="text-lg text-muted-foreground">Loading document data...</p>
+      </div>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <div className="flex flex-col items-center justify-center w-full h-full min-h-[500px] space-y-4">
+        <Alert variant="destructive" className="max-w-lg">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            {errorMessage || "An error occurred while loading the document data. Please try again."}
+          </AlertDescription>
+        </Alert>
+        <Button 
+          variant="outline" 
+          onClick={() => window.location.reload()}
+        >
+          <RotateCw className="mr-2 h-4 w-4" />
+          Retry
+        </Button>
       </div>
     );
   }
@@ -438,11 +471,10 @@ export default function ReviewPage({ params }: PageProps) {
               data={extractedData}
               onHighlight={handleHighlight}
               onSelect={handleFieldSelect}
-              confidenceThreshold={confidenceThreshold}
               selectedFieldPath={selectedFieldPath}
-              options={{
-                includePositions: extractionMetadata?.options?.includePositions !== false
-              }}
+              confidenceThreshold={confidenceThreshold}
+              options={{ includePositions: true }}
+              className="h-full"
             />
           }
           rightPanel={
@@ -486,7 +518,9 @@ export default function ReviewPage({ params }: PageProps) {
                                 </div>
                                 <div className="flex justify-between">
                                   <span>Confidence Scores:</span>
-                                  <span className="font-medium">{extractionMetadata.options.includeConfidence !== false ? "Enabled" : "Disabled"}</span>
+                                  <span className="font-medium">
+                                    {extractionMetadata.options?.includePositions ? "Enabled" : "Disabled"}
+                                  </span>
                                 </div>
                               </>
                             )}

@@ -1,16 +1,16 @@
 "use client";
 
-import { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { pdfjs, Document, Page } from "react-pdf";
+import { useResizeObserver } from "@wojtekmaj/react-hooks";
+import { debounce } from "lodash";
+import { AlertCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
-import { useResizeObserver } from "@wojtekmaj/react-hooks";
-import { AlertCircle } from "lucide-react";
-import { debounce } from "lodash";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { Button } from "./ui/button";
 import { PdfHighlightLayer } from "./PdfHighlightLayer";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(

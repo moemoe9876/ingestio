@@ -7,7 +7,7 @@ import { trackServerEvent } from "@/lib/analytics/server";
 import { getCurrentUser } from "@/lib/auth-utils";
 import { checkRateLimit, createRateLimiter, isBatchSizeAllowed, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
-import { enhancePrompt, getDefaultPrompt, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
+import { enhancePrompt, filterExtractedData, getDefaultPrompt, parseRequestedFields, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
@@ -113,8 +113,7 @@ const extractDocumentSchema = z.object({
   documentId: z.string().uuid(),
   extractionPrompt: z.string().min(0).max(1000).optional(),
   includeConfidence: z.boolean().optional().default(true),
-  includePositions: z.boolean().optional().default(false),
-  documentType: z.string().optional()
+  includePositions: z.boolean().optional().default(true)
 });
 
 /**
@@ -209,7 +208,15 @@ export async function extractDocumentDataAction(
         message: `Invalid input: ${parsedInput.error.message}`,
       };
     }
-    const { documentId, extractionPrompt, includeConfidence, includePositions, documentType } = parsedInput.data;
+    
+    // Use the parsed input but apply our defaults
+    const { documentId, extractionPrompt } = parsedInput.data;
+    const includeConfidence = true;  // Always include confidence
+    const includePositions = true;   // Always include positions
+    
+    // ADD LOGGING
+    console.log("[EXTRACTION DEBUG] Extraction prompt received:", extractionPrompt);
+    console.log("[EXTRACTION DEBUG] Always including confidence and positions");
     
     // 3. Get User Profile & Tier
     const profileResult = await getProfileByUserIdAction(userId);
@@ -279,7 +286,6 @@ export async function extractDocumentDataAction(
         extraction_options: {
           includeConfidence,
           includePositions,
-          documentType
         }
       })
       .select()
@@ -318,62 +324,49 @@ export async function extractDocumentDataAction(
     const arrayBuffer = await fileData.arrayBuffer();
     const fileBase64 = Buffer.from(arrayBuffer).toString('base64');
     
-    // 9.5 Detect document type if not provided
-    let detectedType = documentType;
-    if (!detectedType || detectedType === 'unknown') {
-      detectedType = await detectDocumentTypeAction(fileBase64, document.mime_type);
-      
-      // Update extraction job with detected type
-      await supabase
-        .from('extraction_jobs')
-        .update({
-          extraction_options: {
-            ...(extractionJob.extraction_options as Record<string, any> || {}),
-            detectedDocumentType: detectedType
-          }
-        })
-        .eq('id', extractionJob.id);
-    }
-    
     // 10. Prepare Prompt
-    const userPromptText = extractionPrompt || getDefaultPrompt(detectedType);
+    const userPromptText = extractionPrompt || "Extract all relevant information from this document.";
     const enhancedPrompt = enhancePrompt(
       userPromptText, 
       includeConfidence, 
       includePositions
     );
     
-    // Add context about document type
-    const contextualSystemInstructions = `${SYSTEM_INSTRUCTIONS}\nAnalyze the following document (likely a ${detectedType}).`;
+    // Parse requested fields from prompt
+    const requestedFields = parseRequestedFields(userPromptText);
+    console.log("[EXTRACTION DEBUG] Parsed requested fields:", requestedFields);
+    
+    // Simplify system instructions - remove document type references
+    const contextualSystemInstructions = `${SYSTEM_INSTRUCTIONS}\nAnalyze the following document and extract the requested information.`;
     
     // 11. Call Vertex API
     try {
-      // Select appropriate schema based on document type
-      let schema;
-      switch (detectedType) {
-        case 'invoice':
-          schema = invoiceSchema;
-          break;
-        case 'resume':
-          schema = resumeSchema;
-          break;
-        default:
-          // For other document types, use a generic record schema
-          schema = z.record(z.any());
-          break;
-      }
-      
       // Use structured output model
       const model = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
       
       let extractedData: any;
       
-      // Try using generateObject with appropriate schema
+      /**
+       * DOCUMENT PROCESSING STRATEGY
+       * ===========================
+       * First attempt: Try to get structured data using generateObject
+       * This provides type-safe extraction with the provided schema
+       * 
+       * If that fails (often due to permission issues or schema mismatch),
+       * we'll fall back to text generation and try to parse JSON from it.
+       * 
+       * The content is provided as an array of two parts:
+       * 1. Text prompt explaining what to extract
+       * 2. The actual file content as a Buffer
+       * 
+       * This approach ensures the model can process both the instructions
+       * and the document content together for better extraction results.
+       */
       try {
         const result = await generateObject({
           // @ts-ignore - Type compatibility issue between AI SDK versions
           model,
-          schema,
+          schema: z.record(z.any()),
           messages: [
             {
               role: "system",
@@ -390,18 +383,40 @@ export async function extractDocumentDataAction(
         });
         
         // Use the structured object result
-        extractedData = result.object;
+        const rawExtractedData = result.object;
+        
+        // ADD LOGGING HERE - Log the extracted data
+        console.log("[EXTRACTION DEBUG] Extraction complete. Data structure keys:", 
+          Object.keys(rawExtractedData));
+        console.log("[EXTRACTION DEBUG] Original prompt:", enhancedPrompt);
+        
+        // Filter data to include only requested fields
+        extractedData = filterExtractedData(rawExtractedData, requestedFields);
+        console.log("[EXTRACTION DEBUG] Filtered data keys:", Object.keys(extractedData));
       } catch (structuredError) {
-        // Check for permission errors specifically
+        /**
+         * PERMISSION ERROR HANDLING
+         * =======================
+         * This is a critical section that detects if the error is permission-related.
+         * 
+         * Common permission errors occur when:
+         * 1. The service account doesn't have Vertex AI User role
+         * 2. The service account credentials aren't properly configured
+         * 3. The default compute service account is being used instead of a custom one
+         * 
+         * By detecting permission errors early and providing detailed diagnostics,
+         * we can guide users to the correct solution: creating a custom service account
+         * with the right permissions, then configuring the environment variables properly.
+         */
         const errorMessage = structuredError instanceof Error ? structuredError.message : String(structuredError);
         
         if (errorMessage.includes("Permission") && errorMessage.includes("denied")) {
           console.error("Vertex AI permission error:", errorMessage);
           
-          // Log detailed permission error
+          // Log detailed permission error with useful diagnostic information
           console.error(`Permission error details:
             - Project: ${process.env.GOOGLE_VERTEX_PROJECT}
-            - Location: ${location}
+            - Location: ${'us-central1'}
             - Model: ${VERTEX_MODELS.GEMINI_2_0_FLASH}
             - Auth method: ${process.env.GOOGLE_CLIENT_EMAIL ? 'GOOGLE_CLIENT_EMAIL' : 
                             process.env.GOOGLE_CREDENTIALS ? 'GOOGLE_CREDENTIALS' : 
@@ -424,6 +439,15 @@ export async function extractDocumentDataAction(
         // Fall back to generateText if structured generation fails
         console.warn("Structured generation failed, falling back to text generation:", structuredError);
         
+        /**
+         * FALLBACK STRATEGY
+         * ================
+         * If structured extraction fails for non-permission reasons,
+         * we fall back to plain text generation and try to parse JSON from it.
+         * 
+         * This is more flexible but less reliable than structured extraction.
+         * We still provide the document in the same way - as a multipart message.
+         */
         const textResult = await generateText({
           // @ts-ignore - Type compatibility issue between AI SDK versions
           model,
@@ -451,7 +475,11 @@ export async function extractDocumentDataAction(
             .replace(/```\s*$/, '')
             .trim();
             
-          extractedData = JSON.parse(cleanedResponse);
+          const rawData = JSON.parse(cleanedResponse);
+          // Filter data to include only requested fields
+          extractedData = filterExtractedData(rawData, requestedFields);
+          console.log("[EXTRACTION DEBUG] Fallback text extraction filtered data keys:", 
+            Object.keys(extractedData));
         } catch (parseError) {
           // If parsing fails, use the raw text
           extractedData = { raw_text: textResult.text };
@@ -466,7 +494,6 @@ export async function extractDocumentDataAction(
           document_id: documentId,
           user_id: userId,
           data: extractedData,
-          document_type: detectedType
         })
         .select()
         .single();
@@ -499,7 +526,6 @@ export async function extractDocumentDataAction(
         documentId,
         extractionJobId: extractionJob.id,
         tier,
-        documentType: detectedType,
         pageCount: document.page_count || 1
       });
       
@@ -511,6 +537,21 @@ export async function extractDocumentDataAction(
       };
       
     } catch (aiError: unknown) {
+      /**
+       * ERROR HANDLING & DIAGNOSTICS
+       * ==========================
+       * Comprehensive error handling with specific detection for permission issues
+       * 
+       * This is critical for serverless environments where traditional debugging
+       * is difficult, and error messages must be highly informative.
+       * 
+       * For permission errors, we provide:
+       * 1. Detailed error logging in the console
+       * 2. Clear user-facing error messages
+       * 3. Diagnostic information about the current configuration
+       * 4. Guidance on how to fix the issue (service account permissions)
+       */
+      
       // Handle AI extraction error
       const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
       console.error("AI extraction error:", errorMessage);
@@ -550,6 +591,7 @@ export async function extractDocumentDataAction(
         tier
       });
       
+      // User-friendly error message with guidance for permission issues
       return {
         isSuccess: false,
         message: isPermissionError
@@ -591,7 +633,6 @@ export async function extractTextAction(
     extractionPrompt: extractionPrompt || "Extract all text content from this document.",
     includeConfidence: false,
     includePositions: false,
-    documentType: "text"
   });
   
   // Convert result to text-specific format
@@ -624,7 +665,6 @@ export async function extractInvoiceDataAction(
     extractionPrompt: extractionPrompt || getDefaultPrompt("invoice"),
     includeConfidence: true,
     includePositions: false,
-    documentType: "invoice"
   });
 }
 
@@ -642,7 +682,6 @@ export async function extractResumeDataAction(
     extractionPrompt: extractionPrompt || getDefaultPrompt("resume"),
     includeConfidence: true,
     includePositions: false,
-    documentType: "resume"
   });
 }
 
@@ -660,7 +699,6 @@ export async function extractReceiptDataAction(
     extractionPrompt: extractionPrompt || getDefaultPrompt("receipt"),
     includeConfidence: true,
     includePositions: false,
-    documentType: "receipt"
   });
 }
 
@@ -678,50 +716,5 @@ export async function extractFormDataAction(
     extractionPrompt: extractionPrompt || getDefaultPrompt("form"),
     includeConfidence: true,
     includePositions: true, // Include positions for form fields
-    documentType: "form"
   });
-}
-
-/**
- * Function to detect document type using AI
- * @param fileBase64 Base64 encoded file data
- * @param mimeType MIME type of the file
- * @returns Detected document type or 'unknown'
- */
-async function detectDocumentTypeAction(
-  fileBase64: string,
-  mimeType: string
-): Promise<string> {
-  try {
-    // Use a lightweight model for quick detection
-    const model = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
-    
-    const result = await generateText({
-      // @ts-ignore - Type compatibility issue between AI SDK versions
-      model,
-      messages: [
-        {
-          role: "system",
-          content: "You are a document classifier. Analyze the document and identify its type. Respond with a single word: 'invoice', 'resume', 'receipt', 'form', or 'text'."
-        },
-        {
-          role: "user",
-          content: "What type of document is this? Respond with only one word."
-        }
-      ]
-    });
-    
-    // Clean and normalize the response
-    const detectedType = result.text.trim().toLowerCase();
-    
-    // Validate the detected type
-    if (['invoice', 'resume', 'receipt', 'form'].includes(detectedType)) {
-      return detectedType;
-    }
-    
-    return 'text'; // Default to text if we can't detect a specific type
-  } catch (error) {
-    console.error("Error detecting document type:", error);
-    return 'unknown';
-  }
 } 

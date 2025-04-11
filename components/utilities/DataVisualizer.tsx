@@ -1,25 +1,25 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Search, X, Filter, SlidersHorizontal, ChevronRight, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+import { ChevronDown, ChevronRight, Download, Search, SlidersHorizontal, X } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
 import { InteractiveDataField } from "./InteractiveDataField";
 
 // Types
@@ -178,6 +178,14 @@ export function DataVisualizer({
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [minConfidence, setMinConfidence] = useState(confidenceThreshold);
   const [showConfidenceFilter, setShowConfidenceFilter] = useState(false);
+
+  // Log what data was passed to the visualizer
+  useEffect(() => {
+    if (data) {
+      console.log("[VISUALIZER DEBUG] Displaying data with fields:", Object.keys(data));
+      console.log("[VISUALIZER DEBUG] Data structure type:", Array.isArray(data) ? "Array" : "Object");
+    }
+  }, [data]);
 
   // Update minConfidence when confidenceThreshold changes
   useEffect(() => {

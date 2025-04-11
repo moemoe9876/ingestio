@@ -1,18 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Wand2, Settings } from "lucide-react";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Settings } from "lucide-react";
+import { useEffect, useState } from "react";
 
 interface ExtractionOptions {
   includeConfidence: boolean;
@@ -57,7 +57,7 @@ export function PromptInput({ onSubmit, file }: PromptInputProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-foreground">
-            Specify EXACTLY what information you want to extract from the document. Only this information will be extracted.
+            Specify EXACTLY what information you want to extract from the document. <strong>Only the specified information</strong> will be extracted and displayed in the results.
           </p>
           
           <Popover>
@@ -139,10 +139,10 @@ export function PromptInput({ onSubmit, file }: PromptInputProps) {
       <Textarea
         id="prompt"
         className="min-h-[100px] border-secondary resize-none"
-        placeholder="Be specific about exactly what you want to extract, for example:
-- Extract only the name of the sender and recipient from this email
-- Extract just the invoice number, date, and total amount
-- Extract only the shipping address and order number from this receipt"
+        placeholder="Be SPECIFIC about exactly what information you want to extract. ONLY these fields will be shown in results:
+- Example: Extract ONLY the name of the sender and recipient from this email
+- Example: Extract ONLY the invoice number, date, and total amount
+- Example: Extract ONLY the shipping address and order number from this receipt"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
       />

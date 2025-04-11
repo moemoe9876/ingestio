@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const https = require('https');
 
 // Read service account key
-const serviceAccount = require('./service-account.json');
+const serviceAccount = require('../service-account.json');
 
 // Create JWT token
 const now = Math.floor(Date.now() / 1000);
