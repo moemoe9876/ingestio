@@ -665,7 +665,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
 
 ---
 
--   [ ] **Step 5.1: Connect Upload Page & Initial Job Creation**
+-   [x] **Step 5.1: Connect Upload Page & Initial Job Creation**
     *   **Task**: Modify the Upload page (`upload/page.tsx`) and `FileUpload` component. The goal is to use `uploadDocumentAction` to save the file and metadata, and immediately create an `extraction_jobs` record to queue the extraction using the provided prompt.
     *   **Files**:
         *   `app/(dashboard)/dashboard/upload/page.tsx`:

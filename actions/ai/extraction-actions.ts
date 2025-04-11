@@ -111,7 +111,7 @@ type ResumeData = z.infer<typeof resumeSchema>;
 // Define input validation schema for document extraction
 const extractDocumentSchema = z.object({
   documentId: z.string().uuid(),
-  extractionPrompt: z.string().min(2).max(1000).optional(),
+  extractionPrompt: z.string().min(0).max(1000).optional(),
   includeConfidence: z.boolean().optional().default(true),
   includePositions: z.boolean().optional().default(false),
   documentType: z.string().optional()
@@ -381,7 +381,10 @@ export async function extractDocumentDataAction(
             },
             {
               role: "user",
-              content: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}`
+              content: [
+                { type: "text", text: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}` },
+                { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: document.mime_type }
+              ]
             }
           ]
         });
@@ -389,6 +392,35 @@ export async function extractDocumentDataAction(
         // Use the structured object result
         extractedData = result.object;
       } catch (structuredError) {
+        // Check for permission errors specifically
+        const errorMessage = structuredError instanceof Error ? structuredError.message : String(structuredError);
+        
+        if (errorMessage.includes("Permission") && errorMessage.includes("denied")) {
+          console.error("Vertex AI permission error:", errorMessage);
+          
+          // Log detailed permission error
+          console.error(`Permission error details:
+            - Project: ${process.env.GOOGLE_VERTEX_PROJECT}
+            - Location: ${location}
+            - Model: ${VERTEX_MODELS.GEMINI_2_0_FLASH}
+            - Auth method: ${process.env.GOOGLE_CLIENT_EMAIL ? 'GOOGLE_CLIENT_EMAIL' : 
+                            process.env.GOOGLE_CREDENTIALS ? 'GOOGLE_CREDENTIALS' : 
+                            process.env.GOOGLE_APPLICATION_CREDENTIALS ? 'GOOGLE_APPLICATION_CREDENTIALS' : 'ADC'}
+          `);
+          
+          // Update job with permission error details
+          await supabase
+            .from('extraction_jobs')
+            .update({
+              status: "failed",
+              error_message: `Vertex AI permission error: ${errorMessage}. Please check service account permissions.`
+            })
+            .eq('id', extractionJob.id);
+            
+          // Re-throw with more details
+          throw new Error(`Vertex AI permission error: ${errorMessage}. Please ensure the service account has 'roles/aiplatform.user' role.`);
+        }
+        
         // Fall back to generateText if structured generation fails
         console.warn("Structured generation failed, falling back to text generation:", structuredError);
         
@@ -402,7 +434,10 @@ export async function extractDocumentDataAction(
             },
             {
               role: "user",
-              content: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}`
+              content: [
+                { type: "text", text: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}` },
+                { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: document.mime_type }
+              ]
             }
           ]
         });
@@ -477,7 +512,21 @@ export async function extractDocumentDataAction(
       
     } catch (aiError: unknown) {
       // Handle AI extraction error
-      console.error("AI extraction error:", aiError);
+      const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
+      console.error("AI extraction error:", errorMessage);
+      
+      // Check for permission-related errors
+      const isPermissionError = errorMessage.includes("Permission") && errorMessage.includes("denied");
+      
+      // Log authentication details if permission error
+      if (isPermissionError) {
+        console.error(`Vertex AI authentication details for debugging:
+          - Project ID: ${process.env.GOOGLE_VERTEX_PROJECT || 'Not specified'}
+          - Location: ${process.env.GOOGLE_VERTEX_LOCATION || 'us-central1'}
+          - Model: ${VERTEX_MODELS.GEMINI_2_0_FLASH}
+          - Service Account: ${process.env.GOOGLE_CLIENT_EMAIL || 'Not using client_email directly'}
+        `);
+      }
       
       // Update job status to failed
       if (extractionJob) {
@@ -485,7 +534,9 @@ export async function extractDocumentDataAction(
           .from('extraction_jobs')
           .update({
             status: "failed",
-            error_message: `AI extraction failed: ${aiError instanceof Error ? aiError.message : "Unknown AI error"}`
+            error_message: isPermissionError 
+              ? `AI extraction failed due to permission issues: ${errorMessage}. Please check service account permissions.`
+              : `AI extraction failed: ${errorMessage}`
           })
           .eq('id', extractionJob.id);
       }
@@ -494,13 +545,16 @@ export async function extractDocumentDataAction(
       await trackServerEvent("extraction_failed", userId, {
         documentId,
         extractionJobId: extractionJob?.id,
-        error: aiError instanceof Error ? aiError.message : "Unknown AI error",
+        error: errorMessage,
+        isPermissionError,
         tier
       });
       
       return {
         isSuccess: false,
-        message: `AI extraction failed: ${aiError instanceof Error ? aiError.message : "Unknown AI error"}`
+        message: isPermissionError
+          ? `AI extraction failed due to permission issues. Please ensure your service account has Vertex AI User role: ${errorMessage}`
+          : `AI extraction failed: ${errorMessage}`
       };
     }
   } catch (error) {

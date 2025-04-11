@@ -4,6 +4,50 @@ import { createVertex } from '@ai-sdk/google-vertex';
 const project = process.env.GOOGLE_VERTEX_PROJECT;
 const location = process.env.GOOGLE_VERTEX_LOCATION || 'us-central1';
 
+// Log configuration details
+console.log(`Vertex AI Configuration:
+- Project: ${project || 'UNDEFINED - MISSING ENV VAR'}
+- Location: ${location}
+`);
+
+// Parse credentials from environment if available
+let googleAuthOptions = undefined;
+
+// Priority 1: Check for direct client_email and private_key environment variables
+if (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+  try {
+    googleAuthOptions = {
+      credentials: {
+        client_email: process.env.GOOGLE_CLIENT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      }
+    };
+    console.log(`Using Google credentials from GOOGLE_CLIENT_EMAIL for service account: ${process.env.GOOGLE_CLIENT_EMAIL}`);
+  } catch (e) {
+    console.error("Failed to configure credentials from GOOGLE_CLIENT_EMAIL and GOOGLE_PRIVATE_KEY", e);
+    console.error("⚠️ This will likely cause authentication errors with Vertex AI API");
+  }
+} 
+// Priority 2: Check for JSON credentials string
+else if (process.env.GOOGLE_CREDENTIALS) {
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    googleAuthOptions = { credentials };
+    console.log(`Using Google credentials from GOOGLE_CREDENTIALS env var for service account: ${credentials.client_email}`);
+  } catch (e) {
+    console.error("Failed to parse GOOGLE_CREDENTIALS JSON", e);
+    console.error("⚠️ This will likely cause authentication errors with Vertex AI API");
+  }
+} 
+// Priority 3: Check for credentials file path
+else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  console.log(`Using Google credentials from GOOGLE_APPLICATION_CREDENTIALS path: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`);
+  // Default behavior will use the file path, no need to set options explicitly
+} else {
+  console.warn("⚠️ No Google credentials found in environment variables. Attempting default ADC.");
+  console.warn("⚠️ This may cause authentication errors if ADC is not configured.");
+}
+
 /**
  * Configuration for Helicone analytics and proxy
  * Enables tracking AI model usage, performance, and costs
@@ -18,6 +62,9 @@ const heliconeHeaders = useHelicone
     }
   : {};
 
+// Debug flag to log API requests
+const debugMode = process.env.VERTEX_DEBUG === 'true';
+
 /**
  * Create and configure the Vertex AI provider instance
  * This is the main entry point for interacting with Google Vertex AI
@@ -28,14 +75,8 @@ export const vertex = createVertex({
   headers: {
     ...heliconeHeaders,
   },
-  // The default auth method uses GOOGLE_APPLICATION_CREDENTIALS env var
-  // For custom auth, uncomment and configure:
-  // googleAuthOptions: {
-  //   credentials: {
-  //     client_email: process.env.GOOGLE_CLIENT_EMAIL,
-  //     private_key: process.env.GOOGLE_PRIVATE_KEY,
-  //   },
-  // },
+  // Use explicit credentials if available
+  googleAuthOptions,
 });
 
 /**
@@ -43,9 +84,8 @@ export const vertex = createVertex({
  */
 export const VERTEX_MODELS = {
   // Recommended models for document extraction tasks
-  GEMINI_2_5_PRO: 'gemini-2.5-pro',
-  GEMINI_2_0_FLASH: 'gemini-2.0-flash',
-  GEMINI_2_0_FLASH_EXP: 'gemini-2.0-flash-exp', 
+GEMINI_2_0_FLASH: 'gemini-2.0-flash-001'
+
 
 } as const;
 
@@ -62,6 +102,10 @@ export function getVertexModel(modelId: VertexModelId, options = {}) {
     ? VERTEX_MODELS[modelId as keyof typeof VERTEX_MODELS] 
     : modelId;
     
+  if (debugMode) {
+    console.log(`Getting Vertex text model: ${modelName}`);
+  }
+  
   return vertex(modelName, options);
 }
 
@@ -76,6 +120,10 @@ export function getVertexStructuredModel(modelId: VertexModelId, options = {}) {
     ? VERTEX_MODELS[modelId as keyof typeof VERTEX_MODELS] 
     : modelId;
     
+  if (debugMode) {
+    console.log(`Getting Vertex structured model: ${modelName}`);
+  }
+  
   return vertex(modelName, {
     structuredOutputs: true,
     ...options
