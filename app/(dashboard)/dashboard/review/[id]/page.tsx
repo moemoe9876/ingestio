@@ -2,6 +2,17 @@
 
 import { fetchDocumentForReviewAction, updateExtractedDataAction } from "@/actions/db/documents";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,7 +53,7 @@ import {
   Loader2,
   RotateCw
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 interface PageProps {
   params: {
@@ -107,6 +118,10 @@ export default function ReviewPage({ params }: PageProps) {
   const [currentHighlight, setCurrentHighlight] = useState<HighlightRect | null>(null);
   const [selectedFieldPath, setSelectedFieldPath] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [originalData, setOriginalData] = useState<ExtractedData | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showResetDialog, setShowResetDialog] = useState(false);
 
   // Listen for sidebar toggle events
   useEffect(() => {
@@ -179,6 +194,7 @@ export default function ReviewPage({ params }: PageProps) {
         });
         setFileName(document.originalFilename);
         setPdfUrl(signedUrl);
+        setOriginalData(docData.data || docData);
       } catch (error) {
         console.error("Error fetching document data:", error);
         setHasError(true);
@@ -196,38 +212,50 @@ export default function ReviewPage({ params }: PageProps) {
     fetchDocumentData();
   }, [documentId, toast]);
 
-  const handleConfirm = async () => {
-    try {
-      // Save the data to the backend using the server action
-      const result = await updateExtractedDataAction(
-        documentId,
-        extractionMetadata?.jobId || documentId, // Use jobId if available, fall back to documentId
-        {
-          data: extractedData,
-          metadata: extractionMetadata
-        }
+  // Update hasUnsavedChanges whenever extractedData changes
+  useEffect(() => {
+    if (originalData && extractedData) {
+      // Quick comparison using JSON stringify for determining if changes exist
+      setHasUnsavedChanges(
+        JSON.stringify(originalData) !== JSON.stringify(extractedData)
       );
-      
-      if (!result.isSuccess) {
-        throw new Error(result.message || "Failed to save data");
-      }
-      
-      setEditMode(false);
-      setConfirmed(true);
-      
-      toast({
-        title: "Success",
-        description: "Document data confirmed successfully.",
-        variant: "default",
-      });
-    } catch (error) {
-      console.error("Error confirming document:", error);
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to confirm document data. Please try again.",
-        variant: "destructive",
-      });
     }
+  }, [extractedData, originalData]);
+
+  const handleConfirm = async () => {
+    startTransition(async () => {
+      try {
+        // Save the data to the backend using the server action
+        const result = await updateExtractedDataAction(
+          documentId,
+          extractionMetadata?.jobId || documentId, // Use jobId if available, fall back to documentId
+          {
+            data: extractedData,
+            metadata: extractionMetadata
+          }
+        );
+        
+        if (!result.isSuccess) {
+          throw new Error(result.message || "Failed to save data");
+        }
+        
+        setEditMode(false);
+        setConfirmed(true);
+        
+        toast({
+          title: "Success",
+          description: "Document data confirmed successfully.",
+          variant: "default",
+        });
+      } catch (error) {
+        console.error("Error confirming document:", error);
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to confirm document data. Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const handleExport = () => {
@@ -454,6 +482,23 @@ export default function ReviewPage({ params }: PageProps) {
     }
   };
 
+  // Reset function to discard all changes
+  const handleReset = () => {
+    if (originalData) {
+      setExtractedData(JSON.parse(JSON.stringify(originalData)));
+      setEditMode(false);
+      setConfirmed(false);
+      setCurrentHighlight(null);
+      setSelectedFieldPath(null);
+      
+      toast({
+        title: "Changes Discarded",
+        description: "All changes have been discarded and original data restored.",
+        variant: "default",
+      });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center w-full h-full min-h-[500px] space-y-4">
@@ -639,15 +684,35 @@ export default function ReviewPage({ params }: PageProps) {
       </div>
 
       <div className="flex justify-between">
-        <Button
-          variant="outline"
-          onClick={() => {
-            setEditMode(false);
-            setConfirmed(false);
-          }}
-        >
-          Reset
-        </Button>
+        <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (hasUnsavedChanges) {
+                  setShowResetDialog(true);
+                } else {
+                  handleReset();
+                }
+              }}
+              disabled={isPending}
+            >
+              Reset
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Discard all changes?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will reset all edited data back to the original values. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleReset}>Discard Changes</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         
         <div className="flex gap-2">
           <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
@@ -711,11 +776,15 @@ export default function ReviewPage({ params }: PageProps) {
           
           <Button
             onClick={handleConfirm}
-            disabled={confirmed}
+            disabled={confirmed || isPending}
             className="bg-primary text-white hover:bg-primary/90 hover:text-white font-semibold"
             aria-label="Confirm extracted data"
           >
-            {confirmed ? (
+            {isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Processing...
+              </>
+            ) : confirmed ? (
               <>
                 <Check className="mr-2 h-4 w-4" aria-hidden="true" /> Confirmed
               </>
