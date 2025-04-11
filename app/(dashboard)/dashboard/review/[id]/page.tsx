@@ -39,7 +39,6 @@ import {
   Download,
   Edit,
   Eye,
-  FileText,
   Loader2,
   RotateCw
 } from "lucide-react";
@@ -260,74 +259,65 @@ export default function ReviewPage({ params }: PageProps) {
     setShowExportDialog(false);
   };
 
+  // Function to handle field hover in DataVisualizer and create a highlight for DocumentViewer
   const handleFieldHover = (path: string, data: any) => {
     setHoveredField(path);
     setHoveredFieldData(data);
     
-    // If the data has location information, we could highlight it in the PDF viewer
-    // This would require additional implementation in the PdfViewerUrl component
-  };
-
-  const handleFieldSelect = (path: string, data: any) => {
-    // Set the selected field path
-    setSelectedFieldPath(path);
-    
-    // If the data has position information, highlight it in the PDF viewer
-    if (data.position && extractionMetadata?.options?.includePositions !== false) {
-      setCurrentHighlight({
+    // Create highlight from position data if available
+    if (data && data.position) {
+      const highlight: HighlightRect = {
         pageNumber: data.position.page_number,
         boundingBox: data.position.bounding_box,
-        id: path,
-        color: '#3b82f6' // Use a different color for selected highlights
-      });
-    }
-    
-    // Handle field selection - could be used for editing specific fields
-    if (editMode) {
-      // Implement field editing logic here
-      toast({
-        title: "Field Selected",
-        description: `Selected field: ${path}`,
-        variant: "default",
-      });
+        color: 'var(--primary)',
+        id: `highlight-${path}`
+      };
+      setCurrentHighlight(highlight);
+    } else {
+      setCurrentHighlight(null);
     }
   };
 
-  // Handle highlight events from the data visualizer
-  const handleHighlight = (highlight: HighlightRect | null) => {
-    // Only set the highlight if position data is available (based on extraction options)
-    if (highlight || extractionMetadata?.options?.includePositions !== false) {
+  // Function to handle field selection in DataVisualizer
+  const handleFieldSelect = (path: string, data: any) => {
+    setSelectedFieldPath(path);
+    
+    // Create persistent highlight for selected field if it has position data
+    if (data && data.position) {
+      const highlight: HighlightRect = {
+        pageNumber: data.position.page_number,
+        boundingBox: data.position.bounding_box,
+        color: 'var(--primary)',
+        id: `highlight-${path}`
+      };
       setCurrentHighlight(highlight);
     }
+    
+    // Scroll corresponding element into view if exists
+    const fieldElement = document.getElementById(`field-${path.replace(/\./g, '-')}`);
+    if (fieldElement) {
+      fieldElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   };
 
-  // Find a field in the extracted data by its position
+  // Helper function used by DocumentViewer to handle highlights
+  const handleHighlight = (highlight: HighlightRect | null) => {
+    setCurrentHighlight(highlight);
+  };
+
+  // Helper function to find a field in extractedData by clicking on a position in the PDF
   const findFieldByPosition = (pageNumber: number, position: [number, number]): { path: string; data: FieldData } | null => {
-    // If position data is not included in extraction, don't attempt to find fields by position
-    if (extractionMetadata?.options?.includePositions === false) {
-      return null;
-    }
-    
+    if (!extractedData) return null;
+
+    // Define tolerance for position matching (as a percentage)
+    const POSITION_TOLERANCE = 5; 
     const [clickX, clickY] = position;
-    
-    // Helper function to recursively search through the data
+
+    // Recursive function to search through nested objects
     const searchInObject = (obj: any, path: string): { path: string; data: FieldData } | null => {
-      if (!obj || typeof obj !== 'object') return null;
+      if (!obj) return null;
       
-      // Check if this is a field with position data
-      if ('value' in obj && 'confidence' in obj && obj.position) {
-        const pos = obj.position;
-        if (pos.page_number === pageNumber) {
-          const [x1, y1, x2, y2] = pos.bounding_box;
-          // Check if the click is within this field's bounding box
-          if (clickX >= x1 && clickX <= x2 && clickY >= y1 && clickY <= y2) {
-            return { path, data: obj };
-          }
-        }
-        return null;
-      }
-      
-      // If it's an array, search through each item
+      // Handle case when obj is an array
       if (Array.isArray(obj)) {
         for (let i = 0; i < obj.length; i++) {
           const result = searchInObject(obj[i], `${path}[${i}]`);
@@ -336,11 +326,33 @@ export default function ReviewPage({ params }: PageProps) {
         return null;
       }
       
-      // If it's an object, search through each property
-      for (const key in obj) {
-        const newPath = path ? `${path}.${key}` : key;
-        const result = searchInObject(obj[key], newPath);
-        if (result) return result;
+      // Handle case when obj is FieldData with position
+      if (obj.position && obj.value !== undefined && obj.confidence !== undefined) {
+        const { position } = obj;
+        if (position.page_number === pageNumber && position.bounding_box && position.bounding_box.length === 4) {
+          const [x1, y1, x2, y2] = position.bounding_box;
+          
+          // Check if click position is within or near the bounding box
+          if (
+            clickX >= x1 - POSITION_TOLERANCE && 
+            clickX <= x2 + POSITION_TOLERANCE && 
+            clickY >= y1 - POSITION_TOLERANCE && 
+            clickY <= y2 + POSITION_TOLERANCE
+          ) {
+            return { path, data: obj };
+          }
+        }
+      }
+      
+      // Handle regular object - search through properties
+      if (typeof obj === 'object') {
+        for (const [key, value] of Object.entries(obj)) {
+          if (typeof value === 'object') {
+            const newPath = path ? `${path}.${key}` : key;
+            const result = searchInObject(value, newPath);
+            if (result) return result;
+          }
+        }
       }
       
       return null;
@@ -349,46 +361,24 @@ export default function ReviewPage({ params }: PageProps) {
     return searchInObject(extractedData, '');
   };
 
-  // Handle clicks on the PDF viewer
+  // Handle click on PDF position from DocumentViewer
   const handlePdfPositionClick = (pageNumber: number, position: [number, number]) => {
-    const field = findFieldByPosition(pageNumber, position);
+    const foundField = findFieldByPosition(pageNumber, position);
     
-    if (field) {
-      // Highlight the field in the data visualizer
-      setSelectedFieldPath(field.path);
+    if (foundField) {
+      // Select the field in DataVisualizer
+      handleFieldSelect(foundField.path, foundField.data);
       
-      // Create a highlight for the PDF viewer
-      setCurrentHighlight({
-        pageNumber: pageNumber,
-        boundingBox: field.data.position!.bounding_box,
-        id: field.path,
-        color: '#3b82f6' // Use a different color for clicked highlights
-      });
-      
-      // Scroll the field into view in the data visualizer
-      const fieldElement = document.getElementById(`field-${field.path.replace(/\./g, '-')}`);
-      if (fieldElement) {
-        fieldElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Add a temporary highlight effect
-        fieldElement.classList.add('bg-primary/20');
-        setTimeout(() => {
-          fieldElement.classList.remove('bg-primary/20');
-        }, 2000);
-      }
-      
+      // Optional: Show a toast notification that field was found
       toast({
         title: "Field Found",
-        description: `Found field: ${field.path.split('.').pop()?.replace(/_/g, ' ')}`,
-        variant: "default",
+        description: `Selected: ${foundField.path.split('.').pop() || foundField.path}`,
       });
     } else {
-      // No field found at this position
-      setCurrentHighlight(null);
-      setSelectedFieldPath(null);
-      
+      // Optional: Show a toast that no field was found at this position
       toast({
         title: "No Field Found",
-        description: "No data field was found at this position.",
+        description: "No data field found at this position.",
         variant: "default",
       });
     }
@@ -533,21 +523,20 @@ export default function ReviewPage({ params }: PageProps) {
               </CardHeader>
               
               <CardContent className="flex-1 overflow-auto p-0 bg-muted/50 relative">
-                {pdfUrl ? (
-                  <DocumentViewer 
-                    url={pdfUrl} 
-                    highlights={currentHighlight ? [currentHighlight] : []}
-                    onPositionClick={handlePdfPositionClick}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center text-center p-6 h-full">
-                    <FileText className="h-16 w-16 text-muted-foreground mb-4" />
-                    <h3 className="text-lg font-medium">{fileName || "Document Preview"}</h3>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      Preview not available
-                    </p>
-                  </div>
-                )}
+                {/* Document Panel */}
+                <div className="h-full overflow-hidden flex flex-col relative bg-background border-r">
+                  {pdfUrl ? (
+                    <DocumentViewer 
+                      url={pdfUrl} 
+                      highlights={currentHighlight ? [currentHighlight] : []}
+                      onPositionClick={handlePdfPositionClick}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center">
+                      <p className="text-muted-foreground">No document to display</p>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           }
