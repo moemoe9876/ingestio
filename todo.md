@@ -8,4 +8,10 @@
 
 ## most recent document (1 hour old) doesn't appear after a manual refresh in history page recently processed, the issue might lie deeper, potentially in backend caching, database delays, or the fetchUserDocumentsAction implementation itself
 
-## improve metrics page !!
+## Iprove Step 5.6: Implement History Page
+
+## Improve Step 5.7: Implement Metrics Page
+
+## Improve Step 5.8: Implement App-Specific Settings 
+
+## Improve Step 5.10: Implement Dashboard Page
