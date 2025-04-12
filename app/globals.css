@@ -108,6 +108,9 @@
   h1, h2, h3, h4, h5, h6 {
     @apply text-foreground;
   }
+  .theme {
+    --animate-gradient: gradient 8s linear infinite;
+  }
 }
 
 /* --- SHADCN EXAMPLE THEME SCALING (Keep if needed) --- */
@@ -170,7 +173,6 @@
 */
 /* --- END MAIN CONTENT PADDING --- */
 
-
 /* --- OTHER UTILITIES --- */
 @layer utilities {
   .text-balance {
@@ -196,5 +198,13 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@theme inline {
+  @keyframes gradient {
+  to {
+    backgroundPosition: var(--bg-size, 300%) 0;
+    }
   }
 }

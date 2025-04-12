@@ -455,13 +455,22 @@ export async function fetchUserDocumentsAction({
       query = query.eq("status", statusFilter as 'uploaded' | 'processing' | 'completed' | 'failed')
     }
 
-    // 4. Apply sorting
-    const validSortBy = ["original_filename", "status", "created_at", "updated_at"]
-    if (sortBy && validSortBy.includes(sortBy)) {
-      query = query.order(sortBy === "createdAt" ? "created_at" : sortBy, {
-        ascending: sortOrder === "asc",
-      })
-    }
+    // 4. Apply sorting - Convert camelCase field names to snake_case for database
+    // Map of frontend field names to database column names
+    const fieldNameMap: Record<string, string> = {
+      "originalFilename": "original_filename",
+      "createdAt": "created_at",
+      "updatedAt": "updated_at",
+      "status": "status"
+    };
+    
+    // Get the correct database field name
+    const dbFieldName = fieldNameMap[sortBy] || sortBy;
+    
+    // Apply the sort
+    query = query.order(dbFieldName, {
+      ascending: sortOrder === "asc",
+    });
 
     // 5. Apply pagination
     const offset = (page - 1) * pageSize

@@ -683,7 +683,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
     *   **Step Dependencies**: 4.2 (`uploadDocumentAction`), 4.3 (`extractDocumentDataAction`), Existing UI, `db/schema/extraction-jobs-schema.ts`.
     *   **User Instructions**: Refactor the main submission handler in `upload/page.tsx` to first call `uploadDocumentAction`, then on success, call `extractDocumentDataAction`. Use `startTransition` for loading state. Display errors clearly. Ensure prompt/options state is correctly passed from `FileUpload` to the page and then to the extraction action.
 
--   [ ] **Step 5.2: Connect Review Page - Data Loading & Status Handling**
+-   [x] **Step 5.2: Connect Review Page - Data Loading & Status Handling**
     *   **Task**: Modify the Review page (`review/[id]/page.tsx`) to fetch initial data using `fetchDocumentForReviewAction` and handle different document/extraction statuses.
     *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`.
     *   **Step Dependencies**: 4.7 (`fetchDocumentForReviewAction`), 4.3 (`extractDocumentDataAction`), Existing UI (`DataVisualizer`, `DocumentViewer`).
@@ -699,7 +699,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
             *   If status is `processing`, show a loading/processing indicator and potentially implement polling or real-time updates (e.g., using Supabase Realtime) to refresh data when complete.
             *   If status is `failed`, display the error message (fetched from `extraction_jobs.errorMessage`).
 
--   [ ] **Step 5.3: Connect Review Page - Document Viewer Interaction**
+-   [x] **Step 5.3: Connect Review Page - Document Viewer Interaction**
     *   **Task**: Ensure `DocumentViewer` displays the document via `signedUrl` and integrates with `DataVisualizer` for highlighting.
     *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`, `components/utilities/DocumentViewer.tsx`, `components/utilities/PdfViewerUrl.tsx`, `components/utilities/PdfHighlightLayer.tsx`.
     *   **Step Dependencies**: 5.2.
@@ -711,7 +711,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
         *   Implement the `onPositionClick` handler in `DocumentViewer`/`PdfViewerUrl` to calculate the clicked percentage coordinates. Pass this up to `review/[id]/page.tsx`.
         *   In `review/[id]/page.tsx`, use the clicked coordinates to find the corresponding field in `extractedData` (if positions exist) and update the selection state for `DataVisualizer`.
 
--   [ ] **Step 5.4: Connect Review Page - Data Visualizer Interaction**
+-   [x] **Step 5.4: Connect Review Page - Data Visualizer Interaction**
     *   **Task**: Ensure `DataVisualizer` displays `extractedData` and triggers highlight/selection events.
     *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`, `components/utilities/DataVisualizer.tsx`, `components/utilities/InteractiveDataField.tsx`.
     *   **Step Dependencies**: 5.2.
@@ -732,7 +732,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
         *   Use `useTransition` to manage the saving state (disable button, show spinner).
         *   Display success/error messages from the `ActionState` response using `toast`.
 
--   [ ] **Step 5.6: Implement History Page**
+-   [x] **Step 5.6: Implement History Page**
     *   **Task**: Build the History page to list processed documents, allowing review, deletion, and filtering.
     *   **Files**:
         *   `app/(dashboard)/dashboard/history/page.tsx`: Client component to fetch, display, filter, and manage documents.
