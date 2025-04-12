@@ -414,4 +414,97 @@ export async function updateExtractedDataAction(
       error: "500"
     }
   }
+}
+
+/**
+ * Fetches a paginated and filtered list of documents for the current user
+ */
+export async function fetchUserDocumentsAction({
+  searchTerm = "",
+  statusFilter = "all",
+  page = 1,
+  pageSize = 10,
+  sortBy = "createdAt",
+  sortOrder = "desc",
+}: {
+  searchTerm?: string;
+  statusFilter?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}): Promise<
+  ActionState<{ documents: SelectDocument[]; totalCount: number }>
+> {
+  try {
+    // 1. Authentication check
+    const userId = await getCurrentUser()
+
+    // 2. Initialize query
+    const supabase = await createAdminClient()
+    let query = supabase
+      .from("documents")
+      .select("*", { count: "exact" }) // Select all columns and get count
+      .eq("user_id", userId)
+
+    // 3. Apply filters
+    if (searchTerm) {
+      query = query.ilike("original_filename", `%${searchTerm}%`)
+    }
+    if (statusFilter && statusFilter !== "all") {
+      query = query.eq("status", statusFilter as 'uploaded' | 'processing' | 'completed' | 'failed')
+    }
+
+    // 4. Apply sorting
+    const validSortBy = ["original_filename", "status", "created_at", "updated_at"]
+    if (sortBy && validSortBy.includes(sortBy)) {
+      query = query.order(sortBy === "createdAt" ? "created_at" : sortBy, {
+        ascending: sortOrder === "asc",
+      })
+    }
+
+    // 5. Apply pagination
+    const offset = (page - 1) * pageSize
+    query = query.range(offset, offset + pageSize - 1)
+
+    // 6. Execute query
+    const { data: documentsData, error, count } = await query
+
+    if (error) {
+      console.error("Error fetching documents:", error)
+      return {
+        isSuccess: false,
+        message: "Failed to fetch documents",
+        error: error.message,
+      }
+    }
+
+    // 7. Map data to SelectDocument type
+    const documents: SelectDocument[] = documentsData.map((doc) => ({
+      id: doc.id,
+      userId: doc.user_id,
+      originalFilename: doc.original_filename,
+      storagePath: doc.storage_path,
+      mimeType: doc.mime_type,
+      fileSize: doc.file_size,
+      pageCount: doc.page_count,
+      status: doc.status,
+      createdAt: new Date(doc.created_at),
+      updatedAt: doc.updated_at ? new Date(doc.updated_at) : new Date(doc.created_at),
+    }))
+
+    return {
+      isSuccess: true,
+      message: "Documents fetched successfully",
+      data: { documents, totalCount: count || 0 },
+    }
+  } catch (error) {
+    console.error("Error fetching documents:", error)
+    return {
+      isSuccess: false,
+      message:
+        error instanceof Error ? error.message : "Unknown error fetching documents",
+      error: "500",
+    }
+  }
 } 

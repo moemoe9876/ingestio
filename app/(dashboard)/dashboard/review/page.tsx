@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { ResizablePanels } from "@/components/ResizablePanels";
-import DocumentViewer from "@/components/DocumentViewer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, FileText, MessageSquare, RotateCcw, Edit, Save } from "lucide-react";
+import DocumentViewer from "@/components/utilities/DocumentViewer";
+import { ResizablePanels } from "@/components/utilities/ResizablePanels";
+import { Check, Edit, FileText, MessageSquare, RotateCcw, Save } from "lucide-react";
+import { useState } from "react";
 
 // Mock data for the current document
 const mockDocument = {
