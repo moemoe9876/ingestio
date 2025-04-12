@@ -1,280 +1,298 @@
 "use client";
 
-import { migrateFreeMembershipsToStarterAction } from "@/actions/db/profiles-actions";
+import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
+import { getCurrentUserDataAction, updateUserIdentityAction } from "@/actions/db/users-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/use-toast";
-import { AlertTriangle, Bug, Database, Download, Globe, Save, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { SelectProfile } from "@/db/schema/profiles-schema";
+import { SelectUser } from "@/db/schema/users-schema";
+import { useUser } from "@clerk/nextjs";
+import { Download, Loader, Save } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+
+interface UserMetadata {
+  theme?: string;
+  language?: string;
+  dateFormat?: string;
+  timeFormat?: string;
+  notificationSettings?: {
+    processing?: boolean;
+    errors?: boolean;
+    summary?: boolean;
+  };
+  privacySettings?: {
+    analytics?: boolean;
+    storage?: boolean;
+  };
+}
 
 export default function SettingsPage() {
-  const [isFixingMemberships, setIsFixingMemberships] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const { user } = useUser();
   
-  const handleFixMemberships = async () => {
-    try {
-      setIsFixingMemberships(true);
-      const result = await migrateFreeMembershipsToStarterAction();
-      
-      if (result.isSuccess) {
-        toast({
-          title: "Success",
-          description: result.message,
-          variant: "default"
-        });
-      } else {
+  // Form states
+  const [theme, setTheme] = useState("system");
+  const [language, setLanguage] = useState("en");
+  const [dateFormat, setDateFormat] = useState("mdy");
+  const [timeFormat, setTimeFormat] = useState("12h");
+  
+  // Notification settings
+  const [notifyProcessing, setNotifyProcessing] = useState(true);
+  const [notifyErrors, setNotifyErrors] = useState(true);
+  const [notifySummary, setNotifySummary] = useState(false);
+  
+  // Privacy settings
+  const [dataAnalytics, setDataAnalytics] = useState(true);
+  const [dataStorage, setDataStorage] = useState(true);
+  
+  // User data
+  const [userData, setUserData] = useState<SelectUser | null>(null);
+  const [profileData, setProfileData] = useState<SelectProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Load user settings from metadata if available
+  useEffect(() => {
+    async function loadUserData() {
+      try {
+        setIsLoading(true);
+        const userResult = await getCurrentUserDataAction();
+        
+        if (!user?.id) return;
+        
+        const profileResult = await getProfileByUserIdAction(user.id);
+        
+        if (userResult.isSuccess && userResult.data) {
+          setUserData(userResult.data);
+          
+          // Load settings from metadata if available
+          const metadata = userResult.data.metadata as UserMetadata || {};
+          
+          if (metadata.theme) {
+            setTheme(metadata.theme);
+          }
+          
+          if (metadata.language) {
+            setLanguage(metadata.language);
+          }
+          
+          if (metadata.dateFormat) {
+            setDateFormat(metadata.dateFormat);
+          }
+          
+          if (metadata.timeFormat) {
+            setTimeFormat(metadata.timeFormat);
+          }
+          
+          if (metadata.notificationSettings) {
+            if (metadata.notificationSettings.processing !== undefined) {
+              setNotifyProcessing(metadata.notificationSettings.processing);
+            }
+            
+            if (metadata.notificationSettings.errors !== undefined) {
+              setNotifyErrors(metadata.notificationSettings.errors);
+            }
+            
+            if (metadata.notificationSettings.summary !== undefined) {
+              setNotifySummary(metadata.notificationSettings.summary);
+            }
+          }
+          
+          if (metadata.privacySettings) {
+            if (metadata.privacySettings.analytics !== undefined) {
+              setDataAnalytics(metadata.privacySettings.analytics);
+            }
+            
+            if (metadata.privacySettings.storage !== undefined) {
+              setDataStorage(metadata.privacySettings.storage);
+            }
+          }
+        }
+        
+        if (profileResult.isSuccess && profileResult.data) {
+          setProfileData(profileResult.data);
+        }
+      } catch (error) {
+        console.error("Error loading user data:", error);
         toast({
           title: "Error",
-          description: result.message,
+          description: "Failed to load user settings",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    if (user?.id) {
+      loadUserData();
+    }
+  }, [user?.id]);
+  
+  const handleSaveSettings = () => {
+    if (!user?.id || !userData) return;
+    
+    startTransition(async () => {
+      try {
+        // Collect metadata from all settings categories
+        const metadata: UserMetadata = {
+          theme,
+          language,
+          dateFormat,
+          timeFormat,
+          notificationSettings: {
+            processing: notifyProcessing,
+            errors: notifyErrors,
+            summary: notifySummary
+          },
+          privacySettings: {
+            analytics: dataAnalytics,
+            storage: dataStorage
+          }
+        };
+        
+        // Update user data with metadata
+        const updateResult = await updateUserIdentityAction(user.id, {
+          metadata: metadata as Record<string, any>
+        });
+        
+        if (updateResult.isSuccess) {
+          toast({
+            title: "Success",
+            description: "Settings updated successfully",
+            variant: "default"
+          });
+          
+          // Update local user data
+          setUserData(updateResult.data);
+        } else {
+          toast({
+            title: "Error",
+            description: updateResult.message,
+            variant: "destructive"
+          });
+        }
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Unknown error",
           variant: "destructive"
         });
       }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive"
-      });
-    } finally {
-      setIsFixingMemberships(false);
-    }
+    });
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <Loader className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Settings</h1>
         <p className="text-muted-foreground">
-          Manage your application settings and preferences
+          Manage your account settings and preferences
         </p>
       </div>
       
       <Tabs defaultValue="general" className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="integration">API & Integrations</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="privacy">Privacy & Data</TabsTrigger>
-          {process.env.NODE_ENV === 'development' && (
-            <TabsTrigger value="debug">Debug</TabsTrigger>
-          )}
         </TabsList>
         
         <TabsContent value="general">
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Display Settings</CardTitle>
-                <CardDescription>
-                  Customize how the application appears
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="theme">Theme Preference</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Choose your preferred theme
-                    </p>
-                  </div>
-                  <Select defaultValue="system">
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Select theme" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="system">System</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <Separator />
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Sidebar Behavior</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Auto-collapse sidebar on small screens
-                    </p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Compact Mode</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Reduce padding and spacing throughout the UI
-                    </p>
-                  </div>
-                  <Switch />
-                </div>
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Animation Effects</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Enable animations and transitions
-                    </p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Language & Region</CardTitle>
-                <CardDescription>
-                  Set your language and regional preferences
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label htmlFor="language">Language</Label>
-                  <Select defaultValue="en">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select language" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="en">English</SelectItem>
-                      <SelectItem value="es">Español</SelectItem>
-                      <SelectItem value="fr">Français</SelectItem>
-                      <SelectItem value="de">Deutsch</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="date-format">Date Format</Label>
-                  <Select defaultValue="mdy">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select date format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mdy">MM/DD/YYYY</SelectItem>
-                      <SelectItem value="dmy">DD/MM/YYYY</SelectItem>
-                      <SelectItem value="ymd">YYYY/MM/DD</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="time-format">Time Format</Label>
-                  <Select defaultValue="12h">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select time format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="12h">12-hour (AM/PM)</SelectItem>
-                      <SelectItem value="24h">24-hour</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <Select defaultValue="utc-8">
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select timezone" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="utc-8">Pacific Time (UTC-8)</SelectItem>
-                      <SelectItem value="utc-5">Eastern Time (UTC-5)</SelectItem>
-                      <SelectItem value="utc+0">UTC+0</SelectItem>
-                      <SelectItem value="utc+1">Central European Time (UTC+1)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-        
-        <TabsContent value="integration">
           <Card className="border-border">
             <CardHeader>
-              <CardTitle>API Settings</CardTitle>
+              <CardTitle>Appearance & Language</CardTitle>
               <CardDescription>
-                Manage your API keys and integration settings
+                Customize application appearance and language settings
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-medium">API Access</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Enable API access to your account
-                    </p>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-                
-                <Separator />
-                
-                <div className="space-y-4">
-                  <Label>API Key</Label>
-                  <div className="flex gap-2">
-                    <Input 
-                      value="api_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789" 
-                      type="password" 
-                      className="flex-1 font-mono text-sm"
-                      readOnly
-                    />
-                    <Button variant="outline">
-                      Show
-                    </Button>
-                    <Button variant="outline">
-                      Regenerate
-                    </Button>
-                  </div>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="theme">Theme Preference</Label>
                   <p className="text-sm text-muted-foreground">
-                    This key grants full access to your account via API. Keep it secure.
+                    Choose your preferred theme
                   </p>
                 </div>
-                
-                <Separator />
-                
-                <div className="space-y-4">
-                  <h3 className="font-medium">Third-Party Integrations</h3>
-                  
-                  <div className="rounded-md border p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center">
-                          <Globe className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <h4 className="font-medium">Google Drive</h4>
-                          <p className="text-sm text-muted-foreground">Import and export documents</p>
-                        </div>
-                      </div>
-                      <Button variant="outline" size="sm">Connect</Button>
-                    </div>
-                  </div>
-                  
-                  <div className="rounded-md border p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded bg-primary/10 flex items-center justify-center">
-                          <Database className="h-4 w-4 text-primary" />
-                        </div>
-                        <div>
-                          <h4 className="font-medium">Dropbox</h4>
-                          <p className="text-sm text-muted-foreground">Import and export documents</p>
-                        </div>
-                      </div>
-                      <Button variant="outline" size="sm">Connect</Button>
-                    </div>
-                  </div>
-                </div>
+                <Select 
+                  value={theme}
+                  onValueChange={setTheme}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select theme" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                    <SelectItem value="system">System</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <Separator />
+              
+              <div className="space-y-2">
+                <Label htmlFor="language">Language</Label>
+                <Select 
+                  value={language}
+                  onValueChange={setLanguage}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select language" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="es">Español</SelectItem>
+                    <SelectItem value="fr">Français</SelectItem>
+                    <SelectItem value="de">Deutsch</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="date-format">Date Format</Label>
+                <Select 
+                  value={dateFormat}
+                  onValueChange={setDateFormat}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select date format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mdy">MM/DD/YYYY</SelectItem>
+                    <SelectItem value="dmy">DD/MM/YYYY</SelectItem>
+                    <SelectItem value="ymd">YYYY/MM/DD</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="time-format">Time Format</Label>
+                <Select 
+                  value={timeFormat}
+                  onValueChange={setTimeFormat}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select time format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="12h">12-hour (AM/PM)</SelectItem>
+                    <SelectItem value="24h">24-hour</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>
@@ -300,7 +318,11 @@ export default function SettingsPage() {
                         When document processing is complete
                       </p>
                     </div>
-                    <Switch id="notify-processing" defaultChecked />
+                    <Switch 
+                      id="notify-processing" 
+                      checked={notifyProcessing}
+                      onCheckedChange={setNotifyProcessing}
+                    />
                   </div>
                   
                   <div className="flex items-center justify-between">
@@ -310,7 +332,11 @@ export default function SettingsPage() {
                         When document processing encounters an error
                       </p>
                     </div>
-                    <Switch id="notify-errors" defaultChecked />
+                    <Switch 
+                      id="notify-errors" 
+                      checked={notifyErrors}
+                      onCheckedChange={setNotifyErrors}
+                    />
                   </div>
                   
                   <div className="flex items-center justify-between">
@@ -320,33 +346,11 @@ export default function SettingsPage() {
                         Weekly summary of your document processing activity
                       </p>
                     </div>
-                    <Switch id="notify-summary" />
-                  </div>
-                </div>
-                
-                <Separator />
-                
-                <h3 className="font-medium">Browser Notifications</h3>
-                
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="browser-notify" className="font-normal">Enable Browser Notifications</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Show notifications in your browser
-                      </p>
-                    </div>
-                    <Switch id="browser-notify" defaultChecked />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="browser-sound" className="font-normal">Notification Sounds</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Play a sound when notifications appear
-                      </p>
-                    </div>
-                    <Switch id="browser-sound" />
+                    <Switch 
+                      id="notify-summary" 
+                      checked={notifySummary}
+                      onCheckedChange={setNotifySummary}
+                    />
                   </div>
                 </div>
               </div>
@@ -355,147 +359,82 @@ export default function SettingsPage() {
         </TabsContent>
         
         <TabsContent value="privacy">
-          <div className="grid gap-6 md:grid-cols-2">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Privacy Settings</CardTitle>
-                <CardDescription>
-                  Control how your data is used and stored
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="data-analytics" className="font-normal">Usage Analytics</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Allow collection of anonymized usage data to improve the service
-                      </p>
-                    </div>
-                    <Switch id="data-analytics" defaultChecked />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="data-processing" className="font-normal">Document Storage</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Store processed documents for future reference
-                      </p>
-                    </div>
-                    <Switch id="data-processing" defaultChecked />
-                  </div>
-                  
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label htmlFor="data-third-party" className="font-normal">Third-Party Processing</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Allow third-party services to process your documents for enhanced features
-                      </p>
-                    </div>
-                    <Switch id="data-third-party" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Data Management</CardTitle>
-                <CardDescription>
-                  Export or delete your account data
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <div className="p-4 rounded-md border">
-                    <h3 className="font-medium flex items-center gap-2">
-                      <Download className="h-4 w-4 text-primary" />
-                      Export Your Data
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1 mb-3">
-                      Download a copy of your personal data and documents
+          <Card className="border-border">
+            <CardHeader>
+              <CardTitle>Privacy Settings</CardTitle>
+              <CardDescription>
+                Control how your data is used and stored
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="data-analytics" className="font-normal">Usage Analytics</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Allow collection of anonymized usage data to improve the service
                     </p>
-                    <Button variant="outline">
-                      Request Data Export
-                    </Button>
                   </div>
-                  
-                  <div className="p-4 rounded-md border border-destructive/20">
-                    <h3 className="font-medium flex items-center gap-2 text-destructive">
-                      <Trash2 className="h-4 w-4" />
-                      Delete Account
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1 mb-3">
-                      Permanently delete your account and all associated data
-                    </p>
-                    <div className="flex items-center gap-2 mb-3">
-                      <AlertTriangle className="h-4 w-4 text-destructive" />
-                      <p className="text-xs text-destructive">
-                        This action cannot be undone
-                      </p>
-                    </div>
-                    <Button variant="destructive">
-                      Delete Account
-                    </Button>
-                  </div>
+                  <Switch 
+                    id="data-analytics" 
+                    checked={dataAnalytics}
+                    onCheckedChange={setDataAnalytics}
+                  />
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+                
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="data-processing" className="font-normal">Document Storage</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Store processed documents for future reference
+                    </p>
+                  </div>
+                  <Switch 
+                    id="data-processing" 
+                    checked={dataStorage}
+                    onCheckedChange={setDataStorage}
+                  />
+                </div>
+              </div>
+              
+              <Separator />
+              
+              <div className="space-y-4">
+                <div className="p-4 rounded-md border">
+                  <h3 className="font-medium flex items-center gap-2">
+                    <Download className="h-4 w-4 text-primary" />
+                    Export Your Data
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1 mb-3">
+                    Download a copy of your personal data and documents
+                  </p>
+                  <Button variant="outline">
+                    Request Data Export
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
-        
-        {process.env.NODE_ENV === 'development' && (
-          <TabsContent value="debug">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bug className="h-5 w-5" />
-                  Developer Debug Tools
-                </CardTitle>
-                <CardDescription>
-                  These tools are only available in development mode
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="font-medium">Database Fixes</h3>
-                  
-                  <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900/50 p-4">
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start gap-3">
-                        <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-500 mt-0.5" />
-                        <div>
-                          <h4 className="font-medium text-amber-800 dark:text-amber-500">Fix Membership Values</h4>
-                          <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
-                            This will update all profiles with 'free' membership to use 'starter' instead 
-                            to match the enum values defined in the schema.
-                          </p>
-                        </div>
-                      </div>
-                      <div className="pl-8">
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={handleFixMemberships}
-                          disabled={isFixingMemberships}
-                        >
-                          {isFixingMemberships ? "Fixing..." : "Fix Membership Values"}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
       </Tabs>
       
       <div className="flex justify-end gap-2 mt-2">
         <Button variant="outline">Cancel</Button>
-        <Button>
-          <Save className="h-4 w-4 mr-2" />
-          Save Settings
+        <Button 
+          onClick={handleSaveSettings}
+          disabled={isPending}
+        >
+          {isPending ? (
+            <>
+              <Loader className="h-4 w-4 mr-2 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              Save Settings
+            </>
+          )}
         </Button>
       </div>
     </div>
