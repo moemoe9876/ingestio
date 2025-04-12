@@ -1,30 +1,249 @@
 "use client";
 
+import { format } from "date-fns";
+import { motion } from "framer-motion";
+import { AlertCircle, AlertTriangle, Calendar, CheckCircle2, Clock, Download, File } from "lucide-react";
+import { useEffect, useState } from "react";
+import { DateRange } from "react-day-picker";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BarChartComponent, LineChartComponent, PieChartComponent } from "@/components/ui/charts";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { MetricCard } from "@/components/ui/metric-card";
+import { ProgressMetric } from "@/components/ui/progress-metric";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BarChart3, PieChart, LineChart, Download, Calendar, Clock, File, CheckCircle2, AlertCircle } from "lucide-react";
+
+import { fetchUserMetricsAction } from "@/actions/db/metrics-actions";
+
+// Animation variants for staggered entry
+const fadeInUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0 }
+};
+
+const container = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1
+    }
+  }
+};
 
 export default function MetricsPage() {
+  // State for date range selection
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    const today = new Date();
+    return {
+      from: new Date(today.getFullYear(), today.getMonth(), 1), // Start of current month
+      to: today
+    };
+  });
+  
+  // State for metrics data
+  const [metrics, setMetrics] = useState<{
+    usageMetrics?: {
+      pagesProcessed: number;
+      pagesLimit: number;
+      usagePercentage: number;
+      remainingPages: number;
+    };
+    documentMetrics?: {
+      totalDocuments: number;
+      successRate: number;
+      averageProcessingTime: number | null;
+      statusDistribution: {
+        status: string;
+        count: number;
+      }[];
+      docTypeDistribution: {
+        mimeType: string;
+        count: number;
+      }[];
+      processingVolume: {
+        date: string;
+        count: number;
+      }[];
+      topErrors: {
+        error: string;
+        count: number;
+      }[];
+    }
+  }>({});
+  
+  // State for loading and error
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Fetch metrics data when date range changes
+  useEffect(() => {
+    async function fetchMetrics() {
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        if (!dateRange.from || !dateRange.to) return;
+        
+        const result = await fetchUserMetricsAction({
+          from: dateRange.from.toISOString(),
+          to: dateRange.to.toISOString()
+        });
+        
+        if (result.isSuccess && result.data) {
+          setMetrics(result.data);
+        } else {
+          setError(result.message || "Failed to fetch metrics data");
+        }
+      } catch (err) {
+        setError("An unexpected error occurred while fetching metrics data");
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    
+    fetchMetrics();
+  }, [dateRange]);
+  
+  // Handle date range change
+  const handleDateRangeChange = (newDateRange: DateRange | undefined) => {
+    if (newDateRange) {
+      setDateRange(newDateRange);
+    }
+  };
+  
+  // Format document types for display
+  const formatDocumentTypes = () => {
+    if (!metrics.documentMetrics?.docTypeDistribution) return [];
+    
+    return metrics.documentMetrics.docTypeDistribution.map(item => ({
+      mimeType: formatMimeType(item.mimeType),
+      count: item.count
+    }));
+  };
+  
+  // Helper function to format MIME types
+  const formatMimeType = (mimeType: string) => {
+    const mimeMap: Record<string, string> = {
+      "application/pdf": "PDF",
+      "image/jpeg": "JPEG",
+      "image/png": "PNG",
+      "image/tiff": "TIFF",
+      "application/msword": "DOC",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX",
+      "text/csv": "CSV",
+      "application/vnd.ms-excel": "XLS",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX"
+    };
+    
+    return mimeMap[mimeType] || mimeType;
+  };
+  
+  // Helper function to format processing time
+  const formatProcessingTime = (seconds: number | null) => {
+    if (seconds === null) return "N/A";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  };
+
+  // Helper function to format status for display
+  const formatStatus = (status: string) => {
+    const statusMap: Record<string, string> = {
+      "uploaded": "Uploaded",
+      "processing": "Processing",
+      "completed": "Completed",
+      "failed": "Failed"
+    };
+    
+    return statusMap[status] || status;
+  };
+  
+  // Prepare status distribution data for chart
+  const prepareStatusDistribution = () => {
+    if (!metrics.documentMetrics?.statusDistribution) return [];
+    
+    return metrics.documentMetrics.statusDistribution.map(item => ({
+      status: formatStatus(item.status),
+      count: item.count
+    }));
+  };
+  
+  // Prepare processing volume data for chart
+  const prepareProcessingVolume = () => {
+    if (!metrics.documentMetrics?.processingVolume) return [];
+    
+    return metrics.documentMetrics.processingVolume.map(item => ({
+      date: format(new Date(item.date), "MMM dd"),
+      count: item.count
+    }));
+  };
+  
+  // Download metrics as CSV
+  const downloadMetricsCSV = () => {
+    if (!metrics.documentMetrics) return;
+    
+    // Prepare CSV content
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Metric,Value\n";
+    csvContent += `Total Documents,${metrics.documentMetrics.totalDocuments}\n`;
+    csvContent += `Success Rate,${metrics.documentMetrics.successRate}%\n`;
+    csvContent += `Pages Processed,${metrics.usageMetrics?.pagesProcessed || 0}\n`;
+    csvContent += `Pages Limit,${metrics.usageMetrics?.pagesLimit || 0}\n`;
+    csvContent += `Usage Percentage,${metrics.usageMetrics?.usagePercentage || 0}%\n`;
+    
+    // Document types
+    csvContent += "\nDocument Types\n";
+    csvContent += "Type,Count\n";
+    metrics.documentMetrics.docTypeDistribution.forEach(item => {
+      csvContent += `${formatMimeType(item.mimeType)},${item.count}\n`;
+    });
+    
+    // Status distribution
+    csvContent += "\nStatus Distribution\n";
+    csvContent += "Status,Count\n";
+    metrics.documentMetrics.statusDistribution.forEach(item => {
+      csvContent += `${formatStatus(item.status)},${item.count}\n`;
+    });
+    
+    // Processing volume
+    csvContent += "\nProcessing Volume\n";
+    csvContent += "Date,Count\n";
+    metrics.documentMetrics.processingVolume.forEach(item => {
+      csvContent += `${item.date},${item.count}\n`;
+    });
+    
+    // Create download link
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `metrics_${format(new Date(), "yyyy-MM-dd")}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <h1 className="text-3xl font-bold tracking-tight text-foreground">Performance Metrics</h1>
-          <div className="flex items-center gap-2">
-            <Select defaultValue="30">
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Time period" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">Last 7 days</SelectItem>
-                <SelectItem value="30">Last 30 days</SelectItem>
-                <SelectItem value="90">Last 90 days</SelectItem>
-                <SelectItem value="365">Last year</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="icon">
+          <div className="flex items-center gap-2 flex-wrap">
+            <DateRangePicker 
+              dateRange={dateRange}
+              onDateRangeChange={handleDateRangeChange}
+              placeholder="Select date range"
+            />
+            <Button 
+              variant="outline" 
+              size="icon"
+              onClick={downloadMetricsCSV}
+              disabled={isLoading || !!error}
+              title="Download metrics as CSV"
+            >
               <Download className="h-4 w-4" />
               <span className="sr-only">Download report</span>
             </Button>
@@ -35,160 +254,129 @@ export default function MetricsPage() {
         </p>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Documents Processed</CardTitle>
-            <File className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-card-foreground">128</div>
-            <p className="text-xs text-muted-foreground">
-              <span className="text-green-500">↑ 12%</span> from previous period
-            </p>
-          </CardContent>
-        </Card>
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      
+      <motion.div 
+        variants={container}
+        initial="hidden"
+        animate="visible"
+        className="grid grid-cols-1 md:grid-cols-3 gap-4"
+      >
+        <motion.div variants={fadeInUp}>
+          <MetricCard
+            title="Total Documents Processed"
+            value={metrics.documentMetrics?.totalDocuments || 0}
+            icon={File}
+            isLoading={isLoading}
+          />
+        </motion.div>
         
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Average Processing Time</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-card-foreground">42s</div>
-            <p className="text-xs text-muted-foreground">
-              <span className="text-green-500">↓ 8%</span> from previous period
-            </p>
-          </CardContent>
-        </Card>
+        <motion.div variants={fadeInUp}>
+          <MetricCard
+            title="Average Processing Time"
+            value={formatProcessingTime(metrics.documentMetrics?.averageProcessingTime || null)}
+            icon={Clock}
+            isLoading={isLoading}
+          />
+        </motion.div>
         
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-card-foreground">98.2%</div>
-            <p className="text-xs text-muted-foreground">
-              <span className="text-green-500">↑ 1.2%</span> from previous period
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+        <motion.div variants={fadeInUp}>
+          <MetricCard
+            title="Success Rate"
+            value={`${metrics.documentMetrics?.successRate || 0}%`}
+            icon={CheckCircle2}
+            isLoading={isLoading}
+          />
+        </motion.div>
+      </motion.div>
       
       <Tabs defaultValue="usage" className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="usage">Usage Metrics</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
-          <TabsTrigger value="accuracy">Accuracy</TabsTrigger>
+          <TabsTrigger value="accuracy">Distribution</TabsTrigger>
           <TabsTrigger value="efficiency">Efficiency</TabsTrigger>
         </TabsList>
         
         <TabsContent value="usage">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-primary" />
-                  Document Volume by Day
-                </CardTitle>
-                <CardDescription>
-                  Number of documents processed over time
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="h-[350px]">
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  {/* This would be a real chart component in production */}
-                  <div className="w-full h-full bg-muted/20 rounded-md flex items-center justify-center">
-                    Bar chart visualization
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <BarChartComponent
+              title="Document Volume by Day"
+              description="Number of documents processed over time"
+              data={prepareProcessingVolume()}
+              isLoading={isLoading}
+            />
             
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <PieChart className="h-5 w-5 text-primary" />
-                  Document Types
-                </CardTitle>
-                <CardDescription>
-                  Distribution of document types processed
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="h-[350px]">
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  {/* This would be a real chart component in production */}
-                  <div className="w-full h-full bg-muted/20 rounded-md flex items-center justify-center">
-                    Pie chart visualization
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <PieChartComponent
+              title="Document Types"
+              description="Distribution of document types processed"
+              data={formatDocumentTypes()}
+              isLoading={isLoading}
+            />
           </div>
         </TabsContent>
         
         <TabsContent value="performance">
-          <Card className="border-border">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <LineChart className="h-5 w-5 text-primary" />
-                Processing Time
-              </CardTitle>
-              <CardDescription>
-                Average processing time per document (in seconds)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="h-[400px]">
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                {/* This would be a real chart component in production */}
-                <div className="w-full h-full bg-muted/20 rounded-md flex items-center justify-center">
-                  Line chart visualization
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <LineChartComponent
+            title="Processing Time"
+            description="Document processing volume over time"
+            data={prepareProcessingVolume()}
+            isLoading={isLoading}
+          />
         </TabsContent>
         
         <TabsContent value="accuracy">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CheckCircle2 className="h-5 w-5 text-primary" />
-                  Extraction Accuracy
-                </CardTitle>
-                <CardDescription>
-                  Accuracy of extracted data fields
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="h-[350px]">
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  {/* This would be a real chart component in production */}
-                  <div className="w-full h-full bg-muted/20 rounded-md flex items-center justify-center">
-                    Accuracy chart visualization
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <BarChartComponent
+              title="Document Status"
+              description="Status distribution of processed documents"
+              data={prepareStatusDistribution()}
+              isLoading={isLoading}
+              icon={<CheckCircle2 className="h-5 w-5 text-primary" />}
+            />
             
             <Card className="border-border">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <AlertCircle className="h-5 w-5 text-primary" />
-                  Error Distribution
+                  Common Errors
                 </CardTitle>
                 <CardDescription>
-                  Most common error types in document processing
+                  Most frequent error messages in document processing
                 </CardDescription>
               </CardHeader>
               <CardContent className="h-[350px]">
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  {/* This would be a real chart component in production */}
-                  <div className="w-full h-full bg-muted/20 rounded-md flex items-center justify-center">
-                    Error distribution chart
+                {isLoading ? (
+                  <div className="space-y-4">
+                    {Array(5).fill(0).map((_, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+                        <Skeleton className="h-4 w-full" />
+                      </div>
+                    ))}
                   </div>
-                </div>
+                ) : metrics.documentMetrics?.topErrors && metrics.documentMetrics.topErrors.length > 0 ? (
+                  <div className="space-y-4">
+                    {metrics.documentMetrics.topErrors.map((error, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium">{error.error}</p>
+                          <p className="text-xs text-muted-foreground">{error.count} occurrences</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-muted-foreground">
+                    No errors found
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -204,59 +392,51 @@ export default function MetricsPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-8">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">CPU Utilization</div>
-                    <div className="text-sm text-muted-foreground">68%</div>
-                  </div>
-                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                    <div className="bg-primary h-full" style={{ width: '68%' }}></div>
-                  </div>
-                </div>
+                <ProgressMetric 
+                  label="Page Usage"
+                  value={`${metrics.usageMetrics?.pagesProcessed || 0} / ${metrics.usageMetrics?.pagesLimit || 0} pages`}
+                  percentage={metrics.usageMetrics?.usagePercentage || 0}
+                  isLoading={isLoading}
+                />
                 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">Memory Usage</div>
-                    <div className="text-sm text-muted-foreground">42%</div>
-                  </div>
-                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                    <div className="bg-primary h-full" style={{ width: '42%' }}></div>
-                  </div>
-                </div>
+                <ProgressMetric 
+                  label="Success Rate"
+                  value={`${metrics.documentMetrics?.successRate || 0}%`}
+                  percentage={metrics.documentMetrics?.successRate || 0}
+                  color="bg-green-500"
+                  isLoading={isLoading}
+                />
                 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">Concurrent Processing</div>
-                    <div className="text-sm text-muted-foreground">5 documents</div>
-                  </div>
-                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                    <div className="bg-primary h-full" style={{ width: '50%' }}></div>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">Queue Wait Time</div>
-                    <div className="text-sm text-muted-foreground">3.2s average</div>
-                  </div>
-                  <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                    <div className="bg-primary h-full" style={{ width: '32%' }}></div>
-                  </div>
-                </div>
+                <ProgressMetric 
+                  label="Processing Capacity"
+                  value={`${metrics.documentMetrics?.totalDocuments || 0} documents`}
+                  percentage={(metrics.documentMetrics?.totalDocuments || 0) / 2.5}
+                  color="bg-blue-500"
+                  isLoading={isLoading}
+                />
                 
                 <div className="pt-6">
                   <div className="rounded-md border p-4">
                     <div className="flex items-center gap-2">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <div className="text-sm font-medium">Processing Capacity</div>
+                      <div className="text-sm font-medium">Usage Overview</div>
                     </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Based on current usage patterns, your system can process up to <span className="font-medium">250</span> documents per day.
-                    </p>
-                    <div className="mt-4 text-xs text-muted-foreground flex items-center justify-between">
-                      <span>Current daily average: 42 documents</span>
-                      <span className="text-green-500">16.8% of capacity</span>
-                    </div>
+                    {isLoading ? (
+                      <div className="mt-2 space-y-2">
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-4 w-3/4" />
+                      </div>
+                    ) : (
+                      <>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          You have used <span className="font-medium">{metrics.usageMetrics?.pagesProcessed || 0}</span> of <span className="font-medium">{metrics.usageMetrics?.pagesLimit || 0}</span> pages in your current plan.
+                        </p>
+                        <div className="mt-4 text-xs text-muted-foreground flex items-center justify-between">
+                          <span>Pages remaining: {metrics.usageMetrics?.remainingPages || 0}</span>
+                          <span className="text-green-500">{metrics.usageMetrics?.remainingPages ? Math.round((metrics.usageMetrics.remainingPages / metrics.usageMetrics.pagesLimit) * 100) : 0}% remaining</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

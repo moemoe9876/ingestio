@@ -720,7 +720,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
         *   Implement the `onHighlight` prop in `DataVisualizer`: When a field in `InteractiveDataField` is hovered, call this prop function, passing the field's path and position data (if available). The parent page (`review/[id]/page.tsx`) will use this to update the `currentHighlight` state for `DocumentViewer`.
         *   Implement the `onSelect` prop in `DataVisualizer`: When a field is clicked, call this prop function with the field's path and data. The parent page can use this to manage focus or editing state.
 
--   [ ] **Step 5.5: Connect Review Page - Data Update/Confirmation**
+-   [x] **Step 5.5: Connect Review Page - Data Update/Confirmation**
     *   **Task**: Implement saving confirmed or edited extracted data using `updateExtractedDataAction`.
     *   **Files**: `app/(dashboard)/dashboard/review/[id]/page.tsx`, `actions/db/documents.ts` (implement `updateExtractedDataAction`).
     *   **Step Dependencies**: 4.8 (Implement `updateExtractedDataAction`), 5.2.
@@ -747,7 +747,7 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
         *   Add a "Review" link/button for each row linking to `/dashboard/review/[id]`.
         *   Add a "Delete" button for each row. On click, show a confirmation dialog (`AlertDialog`). If confirmed, call `deleteDocumentAction`, use `useTransition`, show toast on success/error, and refetch the document list on success.
 
--   [ ] **Step 5.7: Implement Metrics Page**
+-   [x] **Step 5.7: Implement Metrics Page**
     *   **Task**: Build the Metrics page using real data fetched via server actions.
     *   **Files**:
         *   `app/(dashboard)/dashboard/metrics/page.tsx`: Client component to fetch and display metrics.

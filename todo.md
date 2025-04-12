@@ -7,3 +7,5 @@
 ## When a user hovers on the extracted data panel for a period of time, there will be an animation or effect where that data will be highlighted in the document preview section where it will dynamically go to that data point where it was extracted from the document. We kind of have some code set up right now but it's not working properly so we need to fix that and update that logic.
 
 ## most recent document (1 hour old) doesn't appear after a manual refresh in history page recently processed, the issue might lie deeper, potentially in backend caching, database delays, or the fetchUserDocumentsAction implementation itself
+
+## improve metrics page !!
