@@ -17,7 +17,7 @@ if (
   process.env.NEXT_PUBLIC_POSTHOG_KEY
 ) {
   posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
-    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "/ingest",
+    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com",
     ui_host: "https://eu.posthog.com",
     capture_pageview: false, // We capture pageviews manually
     capture_pageleave: true, // Enable pageleave capture

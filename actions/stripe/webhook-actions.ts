@@ -6,18 +6,21 @@
 
 import { updateProfileByStripeCustomerIdAction } from "@/actions/db/profiles-actions"
 import { createUserUsageAction, updateUserUsageAction } from "@/actions/db/user-usage-actions"
-import { trackServerEvent } from "@/lib/analytics/server"
+import { getPostHogClient, trackServerEvent } from "@/lib/analytics/server"
 import { PlanId, getPlanById } from "@/lib/config/subscription-plans"
 import { processStripeWebhook } from "@/lib/stripe"
 import { ActionState } from "@/types"
 
 // Analytics event constants for tracking
 const ANALYTICS_EVENTS = {
-  SUBSCRIPTION_CREATED: "subscription.created",
-  SUBSCRIPTION_UPDATED: "subscription.updated",
-  SUBSCRIPTION_CANCELED: "subscription.canceled",
-  PAYMENT_SUCCEEDED: "payment.succeeded",
-  PAYMENT_FAILED: "payment.failed"
+  WEBHOOK_RECEIVED: "stripe.webhook.received",
+  WEBHOOK_INVALID: "stripe.webhook.invalid",
+  CHECKOUT_COMPLETED: "stripe.checkout.completed",
+  SUBSCRIPTION_CREATED: "stripe.subscription.created",
+  SUBSCRIPTION_UPDATED: "stripe.subscription.updated",
+  SUBSCRIPTION_CANCELED: "stripe.subscription.canceled",
+  PAYMENT_SUCCEEDED: "stripe.payment.succeeded",
+  PAYMENT_FAILED: "stripe.payment.failed"
 }
 
 /**
@@ -28,9 +31,41 @@ export async function processStripeWebhookAction(
   signature: string
 ): Promise<ActionState<unknown>> {
   try {
+    // Track that we received a webhook
+    const webhookTimestamp = new Date().toISOString()
+    
+    // Track webhook received (without userId since we don't have it yet)
+    try {
+      const client = getPostHogClient()
+      await client.capture({
+        distinctId: 'server', // Use 'server' since we don't have a user ID yet
+        event: ANALYTICS_EVENTS.WEBHOOK_RECEIVED,
+        properties: {
+          timestamp: webhookTimestamp
+        }
+      })
+    } catch (analyticsError) {
+      console.error('Failed to track webhook receipt:', analyticsError)
+    }
+    
     const result = await processStripeWebhook(rawBody, signature)
     
     if (!result.success) {
+      // Track webhook validation failure (without userId since we don't have it yet)
+      try {
+        const client = getPostHogClient()
+        await client.capture({
+          distinctId: 'server', // Use 'server' since we don't have a user ID yet
+          event: ANALYTICS_EVENTS.WEBHOOK_INVALID,
+          properties: {
+            error: result.message,
+            timestamp: webhookTimestamp
+          }
+        })
+      } catch (analyticsError) {
+        console.error('Failed to track invalid webhook:', analyticsError)
+      }
+      
       return { 
         isSuccess: false,
         message: `Failed to process webhook: ${result.message}`
@@ -40,7 +75,7 @@ export async function processStripeWebhookAction(
     // Handle checkout.session.completed
     if (result.data?.userId && result.data?.customerId && 
         result.message.includes('checkout completion')) {
-      const { userId, customerId } = result.data
+      const { userId, customerId, planId } = result.data
       
       // Update user profile with Stripe customer ID
       const profileResult = await updateProfileByStripeCustomerIdAction(
@@ -61,9 +96,13 @@ export async function processStripeWebhookAction(
       // Track event for analytics
       if (profileResult.data?.userId) {
         await trackServerEvent(
-          "checkout.completed",
+          ANALYTICS_EVENTS.CHECKOUT_COMPLETED,
           profileResult.data.userId,
-          { customerId }
+          { 
+            customerId,
+            planId,
+            eventTimestamp: webhookTimestamp
+          }
         )
       }
     }
@@ -130,9 +169,13 @@ export async function processStripeWebhookAction(
           userId,
           { 
             planId, 
+            planName: plan.name,
             subscriptionId, 
             subscriptionStatus,
-            pagesLimit: plan.documentQuota 
+            pagesLimit: plan.documentQuota,
+            billingPeriodStart: periodStart.toISOString(),
+            billingPeriodEnd: periodEnd.toISOString(),
+            eventTimestamp: webhookTimestamp
           }
         )
       }
@@ -163,17 +206,22 @@ export async function processStripeWebhookAction(
       // Track subscription cancellation event
       if (profileResult.data?.userId) {
         const userId = profileResult.data.userId
+        const plan = getPlanById(newPlanId as PlanId)
+        
         await trackServerEvent(
           ANALYTICS_EVENTS.SUBSCRIPTION_CANCELED,
           userId,
           { 
             customerId,
-            newPlanId
+            subscriptionId: result.data.subscriptionId,
+            newPlanId,
+            newPlanName: plan.name,
+            newPagesLimit: plan.documentQuota,
+            eventTimestamp: webhookTimestamp
           }
         )
         
         // Update user usage to reflect new limits
-        const plan = getPlanById(newPlanId as PlanId)
         await updateUserUsageAction(userId, {
           pagesLimit: plan.documentQuota
         })
@@ -183,7 +231,7 @@ export async function processStripeWebhookAction(
     // Handle invoice payment succeeded
     if (result.data?.customerId && result.data?.subscriptionId && 
         result.message.includes('invoice payment')) {
-      const { customerId, subscriptionId, amount } = result.data
+      const { customerId, subscriptionId, amount, currency, invoiceId, billingReason } = result.data
       
       // Get user profile to track the event
       const profileResult = await updateProfileByStripeCustomerIdAction(
@@ -192,13 +240,20 @@ export async function processStripeWebhookAction(
       )
       
       if (profileResult.data?.userId) {
+        const userId = profileResult.data.userId
+        
         await trackServerEvent(
           ANALYTICS_EVENTS.PAYMENT_SUCCEEDED,
-          profileResult.data.userId,
+          userId,
           { 
             customerId,
             subscriptionId,
-            amount
+            amount,
+            currency,
+            invoiceId,
+            billingReason,
+            membership: profileResult.data.membership,
+            eventTimestamp: webhookTimestamp
           }
         )
       }
@@ -207,7 +262,7 @@ export async function processStripeWebhookAction(
     // Handle invoice payment failed
     if (result.data?.customerId && result.data?.subscriptionId && 
         result.message.includes('failed invoice payment')) {
-      const { customerId, subscriptionId } = result.data
+      const { customerId, subscriptionId, invoiceId } = result.data
       
       // Get user profile to track the event
       const profileResult = await updateProfileByStripeCustomerIdAction(
@@ -216,12 +271,17 @@ export async function processStripeWebhookAction(
       )
       
       if (profileResult.data?.userId) {
+        const userId = profileResult.data.userId
+        
         await trackServerEvent(
           ANALYTICS_EVENTS.PAYMENT_FAILED,
-          profileResult.data.userId,
+          userId,
           { 
             customerId,
-            subscriptionId
+            subscriptionId,
+            invoiceId,
+            membership: profileResult.data.membership,
+            eventTimestamp: webhookTimestamp
           }
         )
       }

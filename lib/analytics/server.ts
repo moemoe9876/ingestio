@@ -9,19 +9,35 @@ let posthogInstance: PostHog | null = null;
 export function getPostHogClient(): PostHog {
   if (!posthogInstance) {
     const apiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+    const host = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com";
     
     if (!apiKey) {
       throw new Error("Missing NEXT_PUBLIC_POSTHOG_KEY environment variable");
     }
     
     posthogInstance = new PostHog(apiKey, {
-      host: "https://eu.i.posthog.com",
+      host,
       flushAt: 1, // Send events immediately
       flushInterval: 0,
     });
   }
   
   return posthogInstance;
+}
+
+/**
+ * Flush any pending events and shut down the PostHog client
+ * Call this when your application is shutting down
+ */
+export async function shutdownPostHogClient(): Promise<void> {
+  if (posthogInstance) {
+    try {
+      await posthogInstance.shutdown();
+      posthogInstance = null;
+    } catch (error) {
+      console.error("Error shutting down PostHog client:", error);
+    }
+  }
 }
 
 /**

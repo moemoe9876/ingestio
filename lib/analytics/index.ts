@@ -30,6 +30,11 @@ export const ANALYTICS_EVENTS = {
   CUSTOM_TEMPLATE_CREATED: 'custom_template_created',
   API_KEY_CREATED: 'api_key_created',
   
+  // Extraction events
+  EXTRACTION_STARTED: 'extraction_started',
+  EXTRACTION_COMPLETED: 'extraction_completed',
+  EXTRACTION_FAILED: 'extraction_failed',
+  
   // Page views
   PAGE_VIEW: 'page_view'
 }; 

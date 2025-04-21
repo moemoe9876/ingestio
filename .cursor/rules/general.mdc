@@ -13,6 +13,8 @@ Your goal is to completely finish whatever I ask for.
 
 You will see <ai_context> tags in the code. These are context tags that you should use to help you understand the codebase.
 
+always use pnpm
+
 ## Overview
 
 This is a web app template.
