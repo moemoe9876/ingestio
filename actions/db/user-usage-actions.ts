@@ -46,6 +46,27 @@ export async function initializeUserUsageAction(
     const billingPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const billingPeriodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     
+    // First check if a record already exists for this billing period
+    const existingUsage = await db
+      .select()
+      .from(userUsageTable)
+      .where(
+        and(
+          eq(userUsageTable.userId, userId),
+          eq(userUsageTable.billingPeriodStart, billingPeriodStart)
+        )
+      )
+      .limit(1);
+    
+    // If a record already exists, return it
+    if (existingUsage.length > 0) {
+      return {
+        isSuccess: true,
+        message: "User usage record already exists",
+        data: existingUsage[0]
+      };
+    }
+    
     // Get user profile to determine tier-based page limit
     const profileResult = await getProfileByUserIdAction(userId);
     const tier = profileResult.isSuccess 
@@ -73,6 +94,38 @@ export async function initializeUserUsageAction(
     };
   } catch (error) {
     console.error("Error initializing user usage record:", error);
+    
+    // Attempt to retrieve the record if it was a duplicate key error
+    // This handles race conditions where another request created the record
+    // between our check and insert
+    if (error instanceof Error && error.message.includes('duplicate key')) {
+      try {
+        const now = new Date();
+        const billingPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        
+        const [existingUsage] = await db
+          .select()
+          .from(userUsageTable)
+          .where(
+            and(
+              eq(userUsageTable.userId, userId),
+              eq(userUsageTable.billingPeriodStart, billingPeriodStart)
+            )
+          )
+          .limit(1);
+          
+        if (existingUsage) {
+          return {
+            isSuccess: true,
+            message: "Retrieved existing user usage record",
+            data: existingUsage
+          };
+        }
+      } catch (secondaryError) {
+        console.error("Error retrieving existing usage record:", secondaryError);
+      }
+    }
+    
     return {
       isSuccess: false,
       message: error instanceof Error ? error.message : "Unknown error initializing user usage"

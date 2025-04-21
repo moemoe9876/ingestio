@@ -64,6 +64,8 @@ export async function fetchUserMetricsAction(
     }
     if (dateRange?.to) {
       toDate = new Date(dateRange.to)
+      // Ensure the toDate includes the entire day
+      toDate.setHours(23, 59, 59, 999)
     }
 
     // Get profile and current usage in parallel
@@ -101,7 +103,7 @@ export async function fetchUserMetricsAction(
       extractionStatsResult,
       topErrorsResult
     ] = await Promise.all([
-      // Total documents count
+      // Total documents count - count ALL documents regardless of status
       db.select({
         count: count()
       })
@@ -125,7 +127,7 @@ export async function fetchUserMetricsAction(
       ))
       .groupBy(documentsTable.status),
 
-      // Document type distribution
+      // Document type distribution - include all document types
       db.select({
         mimeType: documentsTable.mimeType,
         count: count()
@@ -138,7 +140,7 @@ export async function fetchUserMetricsAction(
       ))
       .groupBy(documentsTable.mimeType),
 
-      // Processing volume over time (by day)
+      // Processing volume over time (by day) - count creation dates, not processing dates
       db.select({
         date: sql<string>`DATE(${documentsTable.createdAt})`,
         count: count()

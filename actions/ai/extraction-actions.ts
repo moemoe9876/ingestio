@@ -10,6 +10,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { enhancePrompt, filterExtractedData, getDefaultPrompt, parseRequestedFields, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";
 import { generateObject, generateText } from "ai";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 // Define input validation schema for text extraction
@@ -503,18 +504,27 @@ export async function extractDocumentDataAction(
       }
       
       // 14. Update Extraction Job Status
-      await supabase
+      const { data: updatedJob, error: updateError } = await supabase
         .from('extraction_jobs')
         .update({
-          status: "completed"
+          status: "completed",
+          data: extractedData,
+          updated_at: new Date().toISOString()
         })
-        .eq('id', extractionJob.id);
+        .eq('id', extractionJob.id)
+        .select()
+        .single();
+      
+      if (updateError) {
+        console.error("Failed to update extraction job:", updateError);
+      }
       
       // 15. Update Document Status
       await supabase
         .from('documents')
         .update({
-          status: "completed"
+          status: "completed",
+          updated_at: new Date().toISOString()
         })
         .eq('id', documentId);
       
@@ -529,7 +539,12 @@ export async function extractDocumentDataAction(
         pageCount: document.page_count || 1
       });
       
-      // 18. Return Success
+      // 18. Revalidate paths to refresh UI data
+      revalidatePath(`/dashboard/documents/${documentId}`);
+      revalidatePath("/dashboard/documents");
+      revalidatePath("/dashboard/metrics");
+      
+      // 19. Return Success
       return {
         isSuccess: true,
         message: "Document extraction completed successfully",

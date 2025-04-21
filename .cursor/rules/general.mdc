@@ -1,6 +1,7 @@
 ---
-description: Follow these rules for all requests.
+description: 
 globs: 
+alwaysApply: true
 ---
 # Project Instructions
 

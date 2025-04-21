@@ -114,9 +114,11 @@ export async function uploadDocumentAction(
       membership_tier: tier
     })
 
-    // 8. Revalidate path
+    // 8. Revalidate paths
     revalidatePath("/dashboard/documents")
-    
+    revalidatePath("/dashboard/metrics")
+    revalidatePath("/dashboard/history")
+
     // 9. Return success instead of redirecting
     // Let the client handle redirect after extraction
     return {
@@ -207,6 +209,7 @@ export async function deleteDocumentAction(
 
     // 6. Revalidate path to update UI
     revalidatePath("/dashboard/documents")
+    revalidatePath("/dashboard/metrics")
 
     return {
       isSuccess: true,
@@ -400,6 +403,7 @@ export async function updateExtractedDataAction(
 
     // 6. Revalidate path to update UI
     revalidatePath(`/dashboard/documents/${documentId}`)
+    revalidatePath("/dashboard/metrics")
 
     return {
       isSuccess: true,

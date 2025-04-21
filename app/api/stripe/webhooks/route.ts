@@ -47,10 +47,3 @@ export async function POST(request: Request) {
     )
   }
 }
-
-// Disable body parsing - we need the raw body for Stripe signature verification
-export const config = {
-  api: {
-    bodyParser: false
-  }
-}

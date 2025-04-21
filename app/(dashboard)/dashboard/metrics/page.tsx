@@ -3,8 +3,9 @@
 import { format } from "date-fns";
 import { motion } from "framer-motion";
 import { AlertCircle, AlertTriangle, Calendar, CheckCircle2, Clock, Download, File } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { DateRange } from "react-day-picker";
+import useSWR from "swr";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { MetricCard } from "@/components/ui/metric-card";
 import { ProgressMetric } from "@/components/ui/progress-metric";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { fetchUserMetricsAction } from "@/actions/db/metrics-actions";
 
@@ -34,6 +36,9 @@ const container = {
   }
 };
 
+// Refresh interval in milliseconds (5 seconds)
+const REFRESH_INTERVAL = 5000;
+
 export default function MetricsPage() {
   // State for date range selection
   const [dateRange, setDateRange] = useState<DateRange>(() => {
@@ -44,84 +49,58 @@ export default function MetricsPage() {
     };
   });
   
-  // State for metrics data
-  const [metrics, setMetrics] = useState<{
-    usageMetrics?: {
-      pagesProcessed: number;
-      pagesLimit: number;
-      usagePercentage: number;
-      remainingPages: number;
-    };
-    documentMetrics?: {
-      totalDocuments: number;
-      successRate: number;
-      averageProcessingTime: number | null;
-      statusDistribution: {
-        status: string;
-        count: number;
-      }[];
-      docTypeDistribution: {
-        mimeType: string;
-        count: number;
-      }[];
-      processingVolume: {
-        date: string;
-        count: number;
-      }[];
-      topErrors: {
-        error: string;
-        count: number;
-      }[];
-    }
-  }>({});
-  
-  // State for loading and error
-  const [isLoading, setIsLoading] = useState(true);
+  // State for error
   const [error, setError] = useState<string | null>(null);
   
-  // Fetch metrics data when date range changes
-  useEffect(() => {
-    async function fetchMetrics() {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        if (!dateRange.from || !dateRange.to) return;
-        
-        const result = await fetchUserMetricsAction({
-          from: dateRange.from.toISOString(),
-          to: dateRange.to.toISOString()
-        });
-        
-        if (result.isSuccess && result.data) {
-          setMetrics(result.data);
-        } else {
-          setError(result.message || "Failed to fetch metrics data");
-        }
-      } catch (err) {
-        setError("An unexpected error occurred while fetching metrics data");
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
+  // SWR fetcher function
+  const fetcher = async () => {
+    if (!dateRange.from || !dateRange.to) {
+      throw new Error("Invalid date range");
     }
     
-    fetchMetrics();
-  }, [dateRange]);
+    const result = await fetchUserMetricsAction({
+      from: dateRange.from.toISOString(),
+      to: dateRange.to.toISOString()
+    });
+    
+    if (!result.isSuccess) {
+      throw new Error(result.message || "Failed to fetch metrics data");
+    }
+    
+    return result.data;
+  };
+  
+  // Use SWR to fetch data with real-time updates
+  const { data: metrics, isLoading, error: swrError, mutate } = useSWR(
+    ['metrics', dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    fetcher,
+    { 
+      refreshInterval: REFRESH_INTERVAL,
+      revalidateOnFocus: true,
+      dedupingInterval: 1000, // Only dedupe requests within 1 second to ensure fresh data
+      onError: (err) => {
+        console.error(err);
+        setError(err.message || "An unexpected error occurred while fetching metrics data");
+      }
+    }
+  );
   
   // Handle date range change
   const handleDateRangeChange = (newDateRange: DateRange | undefined) => {
     if (newDateRange) {
       setDateRange(newDateRange);
+      // Manually trigger a refresh when date range changes
+      mutate();
     }
   };
   
   // Format document types for display
   const formatDocumentTypes = () => {
-    if (!metrics.documentMetrics?.docTypeDistribution) return [];
+    if (!metrics?.documentMetrics?.docTypeDistribution) return [];
     
     return metrics.documentMetrics.docTypeDistribution.map(item => ({
       mimeType: formatMimeType(item.mimeType),
+      name: formatMimeType(item.mimeType),
       count: item.count
     }));
   };
@@ -164,7 +143,7 @@ export default function MetricsPage() {
   
   // Prepare status distribution data for chart
   const prepareStatusDistribution = () => {
-    if (!metrics.documentMetrics?.statusDistribution) return [];
+    if (!metrics?.documentMetrics?.statusDistribution) return [];
     
     return metrics.documentMetrics.statusDistribution.map(item => ({
       status: formatStatus(item.status),
@@ -174,7 +153,7 @@ export default function MetricsPage() {
   
   // Prepare processing volume data for chart
   const prepareProcessingVolume = () => {
-    if (!metrics.documentMetrics?.processingVolume) return [];
+    if (!metrics?.documentMetrics?.processingVolume) return [];
     
     return metrics.documentMetrics.processingVolume.map(item => ({
       date: format(new Date(item.date), "MMM dd"),
@@ -184,7 +163,7 @@ export default function MetricsPage() {
   
   // Download metrics as CSV
   const downloadMetricsCSV = () => {
-    if (!metrics.documentMetrics) return;
+    if (!metrics?.documentMetrics) return;
     
     // Prepare CSV content
     let csvContent = "data:text/csv;charset=utf-8,";
@@ -226,6 +205,11 @@ export default function MetricsPage() {
     document.body.removeChild(link);
   };
 
+  // Force refresh data - manual refresh button function
+  const refreshData = () => {
+    mutate();
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -237,6 +221,24 @@ export default function MetricsPage() {
               onDateRangeChange={handleDateRangeChange}
               placeholder="Select date range"
             />
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="icon"
+                    onClick={refreshData}
+                    disabled={isLoading}
+                  >
+                    <Clock className="h-4 w-4" />
+                    <span className="sr-only">Refresh data</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Refresh metrics data</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <Button 
               variant="outline" 
               size="icon"
@@ -251,6 +253,9 @@ export default function MetricsPage() {
         </div>
         <p className="text-muted-foreground">
           Track your document processing performance and efficiency metrics
+          <span className="ml-2 text-xs font-medium text-primary">
+            (Auto-refreshes every {REFRESH_INTERVAL / 1000} seconds)
+          </span>
         </p>
       </div>
       
@@ -268,18 +273,29 @@ export default function MetricsPage() {
         className="grid grid-cols-1 md:grid-cols-3 gap-4"
       >
         <motion.div variants={fadeInUp}>
-          <MetricCard
-            title="Total Documents Processed"
-            value={metrics.documentMetrics?.totalDocuments || 0}
-            icon={File}
-            isLoading={isLoading}
-          />
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div>
+                  <MetricCard
+                    title="Total Documents Processed"
+                    value={metrics?.documentMetrics?.totalDocuments || 0}
+                    icon={File}
+                    isLoading={isLoading}
+                  />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Includes all uploaded documents in any status</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </motion.div>
         
         <motion.div variants={fadeInUp}>
           <MetricCard
             title="Average Processing Time"
-            value={formatProcessingTime(metrics.documentMetrics?.averageProcessingTime || null)}
+            value={formatProcessingTime(metrics?.documentMetrics?.averageProcessingTime || null)}
             icon={Clock}
             isLoading={isLoading}
           />
@@ -288,7 +304,7 @@ export default function MetricsPage() {
         <motion.div variants={fadeInUp}>
           <MetricCard
             title="Success Rate"
-            value={`${metrics.documentMetrics?.successRate || 0}%`}
+            value={`${metrics?.documentMetrics?.successRate || 0}%`}
             icon={CheckCircle2}
             isLoading={isLoading}
           />
@@ -360,7 +376,7 @@ export default function MetricsPage() {
                       </div>
                     ))}
                   </div>
-                ) : metrics.documentMetrics?.topErrors && metrics.documentMetrics.topErrors.length > 0 ? (
+                ) : metrics?.documentMetrics?.topErrors && metrics.documentMetrics.topErrors.length > 0 ? (
                   <div className="space-y-4">
                     {metrics.documentMetrics.topErrors.map((error, i) => (
                       <div key={i} className="flex items-start gap-2">
@@ -394,23 +410,23 @@ export default function MetricsPage() {
               <div className="space-y-8">
                 <ProgressMetric 
                   label="Page Usage"
-                  value={`${metrics.usageMetrics?.pagesProcessed || 0} / ${metrics.usageMetrics?.pagesLimit || 0} pages`}
-                  percentage={metrics.usageMetrics?.usagePercentage || 0}
+                  value={`${metrics?.usageMetrics?.pagesProcessed || 0} / ${metrics?.usageMetrics?.pagesLimit || 0} pages`}
+                  percentage={metrics?.usageMetrics?.usagePercentage || 0}
                   isLoading={isLoading}
                 />
                 
                 <ProgressMetric 
                   label="Success Rate"
-                  value={`${metrics.documentMetrics?.successRate || 0}%`}
-                  percentage={metrics.documentMetrics?.successRate || 0}
+                  value={`${metrics?.documentMetrics?.successRate || 0}%`}
+                  percentage={metrics?.documentMetrics?.successRate || 0}
                   color="bg-green-500"
                   isLoading={isLoading}
                 />
                 
                 <ProgressMetric 
                   label="Processing Capacity"
-                  value={`${metrics.documentMetrics?.totalDocuments || 0} documents`}
-                  percentage={(metrics.documentMetrics?.totalDocuments || 0) / 2.5}
+                  value={`${metrics?.documentMetrics?.totalDocuments || 0} documents`}
+                  percentage={(metrics?.documentMetrics?.totalDocuments || 0) / 2.5}
                   color="bg-blue-500"
                   isLoading={isLoading}
                 />
@@ -429,11 +445,11 @@ export default function MetricsPage() {
                     ) : (
                       <>
                         <p className="mt-2 text-sm text-muted-foreground">
-                          You have used <span className="font-medium">{metrics.usageMetrics?.pagesProcessed || 0}</span> of <span className="font-medium">{metrics.usageMetrics?.pagesLimit || 0}</span> pages in your current plan.
+                          You have used <span className="font-medium">{metrics?.usageMetrics?.pagesProcessed || 0}</span> of <span className="font-medium">{metrics?.usageMetrics?.pagesLimit || 0}</span> pages in your current plan.
                         </p>
                         <div className="mt-4 text-xs text-muted-foreground flex items-center justify-between">
-                          <span>Pages remaining: {metrics.usageMetrics?.remainingPages || 0}</span>
-                          <span className="text-green-500">{metrics.usageMetrics?.remainingPages ? Math.round((metrics.usageMetrics.remainingPages / metrics.usageMetrics.pagesLimit) * 100) : 0}% remaining</span>
+                          <span>Pages remaining: {metrics?.usageMetrics?.remainingPages || 0}</span>
+                          <span className="text-green-500">{metrics?.usageMetrics?.remainingPages ? Math.round((metrics?.usageMetrics.remainingPages / metrics?.usageMetrics.pagesLimit) * 100) : 0}% remaining</span>
                         </div>
                       </>
                     )}

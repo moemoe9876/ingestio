@@ -732,76 +732,184 @@ Okay, this plan focuses specifically on **Step 3.1: Define & Apply Supabase Data
         *   Use `useTransition` to manage the saving state (disable button, show spinner).
         *   Display success/error messages from the `ActionState` response using `toast`.
 
--   [x] **Step 5.6: Implement History Page**
-    *   **Task**: Build the History page to list processed documents, allowing review, deletion, and filtering.
-    *   **Files**:
-        *   `app/(dashboard)/dashboard/history/page.tsx`: Client component to fetch, display, filter, and manage documents.
-        *   `actions/db/documents.ts`: Implement `fetchUserDocumentsAction`.
-    *   **Step Dependencies**: 3.1, 4.1, 4.5 (`deleteDocumentAction`).
-    *   **User Instructions**:
-        *   Implement `fetchUserDocumentsAction`: Authenticates user (`getCurrentUser`). Queries `documents` table (join with `extraction_jobs` for latest status if needed). Filters by `userId`. Accepts parameters for pagination, sorting (e.g., by `createdAt`), and filtering (e.g., by `status`, `originalFilename`). Returns `ActionState<{ documents: SelectDocument[], totalCount: number }>`.
-        *   In `history/page.tsx`: Use `useState` for documents list, filters, pagination state. Use `useEffect` to call `fetchUserDocumentsAction` initially and whenever filters/page change. Use `useTransition` for loading states.
-        *   Display documents using `components/ui/table`. Include columns for filename, status, date, actions.
-        *   Add input/select controls for filtering (filename search, status dropdown). Update state and trigger refetch on change.
-        *   Implement pagination controls using fetched `totalCount`.
-        *   Add a "Review" link/button for each row linking to `/dashboard/review/[id]`.
-        *   Add a "Delete" button for each row. On click, show a confirmation dialog (`AlertDialog`). If confirmed, call `deleteDocumentAction`, use `useTransition`, show toast on success/error, and refetch the document list on success.
+Okay, let's refine the remaining implementation steps, focusing on optimizing the page structure, improving data visualization, and providing detailed, file-specific instructions based on your codebase.
 
--   [x] **Step 5.7: Implement Metrics Page**
-    *   **Task**: Build the Metrics page using real data fetched via server actions.
-    *   **Files**:
-        *   `app/(dashboard)/dashboard/metrics/page.tsx`: Client component to fetch and display metrics.
-        *   `actions/db/user-usage-actions.ts`: Implement `fetchUserUsageMetricsAction`.
-        *   `actions/db/documents.ts` / `actions/db/extraction-jobs.ts`: Implement actions for aggregate data (e.g., `fetchDocumentProcessingStatsAction`).
-    *   **Step Dependencies**: 3.1, 4.1.
-    *   **User Instructions**:
-        *   Implement `fetchUserUsageMetricsAction`: Authenticates user. Fetches the current record from `user_usage` for `pagesProcessed` and `pagesLimit`. Returns `ActionState`.
-        *   Implement `fetchDocumentProcessingStatsAction`: Authenticates user. Queries `documents` or `extraction_jobs` to calculate counts by status (e.g., total processed, success rate, average processing time - might require adding timestamps to jobs). Returns `ActionState`.
-        *   In `metrics/page.tsx`: Use `useEffect` to call fetching actions. Manage loading state.
-        *   Display fetched data in `components/ui/card` components.
-        *   Integrate fetched data with chart components (replace placeholders). Add date range filters that trigger refetches.
+**Core Strategy:**
 
--   [ ] **Step 5.8: Implement App-Specific Settings**
-    *   **Task**: Connect the Settings page UI (`settings/page.tsx`) for any app-specific settings (if different from Clerk profile). If only Clerk profile is needed, this step might be minimal.
-    *   **Files**: `app/(dashboard)/dashboard/settings/page.tsx`.
-    *   **Step Dependencies**: 4.6 (`updateUserIdentityAction` - if applicable), `getCurrentUserDataAction`.
-    *   **User Instructions**:
-        *   Determine if any settings beyond Clerk's `UserProfile` component are needed (e.g., default extraction options, notification preferences stored in `users.metadata` or `profiles`).
-        *   If yes: Fetch current settings using `getCurrentUserDataAction` or `getProfileByUserIdAction`. Create form elements. On save, call `updateUserIdentityAction` or `updateProfileAction` with the relevant data. Handle state and feedback.
-        *   If no app-specific settings are needed beyond what Clerk handles, ensure this page primarily renders the Clerk `UserProfile` component or links to it.
+1.  **Combine Billing into Settings:** We will merge the billing functionality into the existing Settings page (`settings/page.tsx`) for a more unified user experience. Step 5.9 will be integrated into Step 5.8.
+2.  **Enhance Visualizations:** We will replace placeholder charts on the Dashboard (`dashboard/page.tsx`) and Metrics (`metrics/page.tsx`) pages with specific, functional charts using Recharts (since it's a dependency) and connect them to the data fetched by `fetchUserMetricsAction`.
+3.  **Detailed Instructions:** Each step will reference specific files, actions, and UI components identified in your codebase.
 
--   [ ] **Step 5.9: Implement Billing Page**
-    *   **Task**: Create the Billing page UI and connect it to Stripe actions for plan changes and billing management.
-    *   **Files**:
-        *   `app/(dashboard)/dashboard/billing/page.tsx` (New File): Client component.
-        *   `components/utilities/PricingTable.tsx` (Optional): Reusable component.
-    *   **Step Dependencies**: 1.9 (Subscription Config), 3.1 (`profiles` schema), 4.1, 6.2 (`createCheckoutSessionAction`), 6.3 (`createBillingPortalSessionAction`), `getProfileByUserIdAction`, `getCurrentUserUsageAction`.
-    *   **User Instructions**:
-        *   Use `useEffect` to fetch user's profile (`getProfileByUserIdAction`) and current usage (`getCurrentUserUsageAction`). Manage loading state.
-        *   Display current plan details (from `profile.membership` and `subscriptionPlans` config) and usage (`usage.pagesProcessed` / `usage.pagesLimit`).
-        *   Display available plans (potentially using `PricingTable` component).
-        *   Implement "Upgrade"/"Change Plan" buttons:
+
+
+**Step 5.6: Implement History Page **
+
+*   [x] **Task**: Enhance the History page (`history/page.tsx`) to effectively display, filter, sort, and manage processed documents using real data and interactive components. Implement the recent documents grid.
+*   **Files**:
+    *   `app/(dashboard)/dashboard/history/page.tsx`: Client component logic.
+    *   `actions/db/documents.ts`: Ensure `fetchUserDocumentsAction` and `deleteDocumentAction` are robust. Potentially add `toggleDocumentStarAction` later.
+    *   `components/ui/table.tsx`, `components/ui/badge.tsx`, `components/ui/dropdown-menu.tsx`, `components/ui/alert-dialog.tsx`, `components/ui/button.tsx`, `components/ui/input.tsx`, `components/ui/select.tsx`, `components/ui/sheet.tsx`, `components/ui/scroll-area.tsx`, `components/utilities/DocumentViewer.tsx`.
+*   **Step Dependencies**: 3.1, 4.1, 4.5 (`deleteDocumentAction`), `fetchDocumentForReviewAction`.
+*   **User Instructions**:
+    1.  **Data Fetching (`history/page.tsx`)**:
+        *   Use `useState` for `allDocuments`, `recentDocuments`, `totalCount`, `isLoading`, `error`, `searchTerm`, `statusFilter`, `typeFilter`, `sortBy`, `sortOrder`, `activeTab`.
+        *   Use `useCallback` for `fetchAllDocumentsAndRecent` function to prevent unnecessary refetches.
+        *   Inside `fetchAllDocumentsAndRecent`:
+            *   Call `fetchUserDocumentsAction` twice:
+                *   Once for the main list, passing debounced search term, popover filters (`statusFilter`, `typeFilter`, `sortBy`, `sortOrder`), and a large `pageSize` (e.g., 1000) to get all relevant data for client-side tab filtering/grouping.
+                *   Once specifically for the "Recent Documents" grid (top section), always sorting by `createdAt` desc and limiting to `RECENT_DOC_COUNT`.
+            *   Update `allDocuments`, `totalCount`, and `recentDocuments` states. Handle loading and error states.
+        *   Use `useEffect` to call `fetchAllDocumentsAndRecent` initially and whenever debounced search term or popover filter/sort states change.
+    2.  **Client-Side Filtering & Grouping (`history/page.tsx`)**:
+        *   Use `useEffect` to re-compute `filteredGroupedDocs` whenever `allDocuments`, `activeTab`, or `typeFilter` changes.
+        *   Implement the client-side filtering logic based on `activeTab` (status or starred) and `typeFilter`.
+        *   Implement the grouping logic using `getTimeGroup` helper.
+        *   Memoize the `orderedGroups` using `useMemo` based on `filteredGroupedDocs`.
+    3.  **UI Implementation (`history/page.tsx`)**:
+        *   **Recent Grid:** Render the `recentDocuments` state in the top grid using `Card` components as shown in the existing code. Ensure links and buttons call `handleViewDetails`.
+        *   **Main List:** Render the `orderedGroups` using the `DocumentList` component structure.
+        *   **Search/Filter Controls:** Connect the `Input` to `searchTerm` state. Connect the filter `Dialog` (`FilterDialogContent`) to manage `statusFilter`, `typeFilter`, `sortBy`, `sortOrder` states via the `applyFiltersFromDialog` and `resetFilters` handlers. Indicate active filters on the trigger button.
+        *   **Tabs:** Connect the `Tabs` component to `activeTab` state.
+        *   **Document List Items:** Use `getFileIcon`, `formatDateDetailed`, `formatFileSize`, `getStatusIcon`, `getStatusColorClasses`. Implement the `DropdownMenu` for actions (View Details, Download - *implement download later*, Delete).
+        *   **Delete:** Connect the Delete `DropdownMenuItem` to an `AlertDialog` for confirmation. On confirm, call `handleDelete` which uses `startDeleteTransition` to call `deleteDocumentAction` and refetches data on success using `fetchAllDocumentsAndRecent`.
+        *   **View Details:** Connect View Details buttons/links to `handleViewDetails`, which uses `startDetailLoadingTransition`, sets `isSheetOpen(true)`, calls `fetchDocumentForReviewAction`, updates `selectedDocumentDetail`, and handles loading/error states within the `Sheet`.
+        *   **Sheet Content:** Use `DocumentViewer` inside the `SheetContent` to display the `selectedDocumentDetail.signedUrl`. Display extracted data (e.g., using a `<pre>` tag for now).
+        *   **Loading/Empty States:** Implement skeleton loaders (`Skeleton`) during `isLoading`. Display informative messages when `documentCountInView` is 0.
+    4.  **Backend Actions (`actions/db/documents.ts`)**:
+        *   Verify `fetchUserDocumentsAction` correctly handles `searchTerm`, `statusFilter`, `sortBy`, `sortOrder`, pagination, and returns `totalCount`.
+        *   Ensure `deleteDocumentAction` correctly deletes the DB record and the file from storage.
+        *   Ensure `fetchDocumentForReviewAction` fetches the document, generates a signed URL, and retrieves the latest `extracted_data` record.
+
+**Step 5.7: Implement Metrics Page (Enhanced Visualization)**
+
+*   [] **Task**: Build the Metrics page (`metrics/page.tsx`) with functional charts displaying relevant data fetched via `fetchUserMetricsAction`.
+*   **Files**:
+    *   `app/(dashboard)/dashboard/metrics/page.tsx`: Client component.
+    *   `actions/db/metrics-actions.ts`: Implement `fetchUserMetricsAction`.
+    *   `components/ui/charts.tsx`: **Remove or replace** this placeholder. Use `recharts` directly or create new specific chart components using it.
+    *   `components/ui/metric-card.tsx`, `components/ui/progress-metric.tsx`, `components/ui/date-range-picker.tsx`, `components/ui/card.tsx`, `components/ui/tabs.tsx`, `components/ui/button.tsx`.
+*   **Step Dependencies**: 3.1, 4.1, `fetchUserUsageAction`.
+*   **User Instructions**:
+    1.  **Data Fetching (`metrics/page.tsx`)**:
+        *   Use `useState` for `metrics`, `isLoading`, `error`, `dateRange`.
+        *   Use `useEffect` to call `fetchUserMetricsAction` with the selected `dateRange` whenever it changes. Handle loading and error states.
+    2.  **UI Implementation (`metrics/page.tsx`)**:
+        *   **Date Range:** Use `DateRangePicker` to control the `dateRange` state.
+        *   **Metric Cards:** Populate the `MetricCard` components using data from `metrics.documentMetrics` (e.g., `totalDocuments`, `averageProcessingTime`, `successRate`). Use `isLoading` state for skeletons.
+        *   **Tabs:** Keep the existing `Tabs` structure (Usage, Performance, Distribution, Efficiency).
+        *   **Chart Implementation (Replace Placeholders):**
+            *   **Usage Tab:**
+                *   *Document Volume:* Use Recharts `BarChart` or `LineChart`. Pass `metrics.documentMetrics.processingVolume` (formatted dates for X-axis, count for Y-axis).
+                *   *Document Types:* Use Recharts `PieChart`. Pass `metrics.documentMetrics.docTypeDistribution` (formatted `mimeType` for labels, `count` for values). Add tooltips showing percentages.
+            *   **Performance Tab:**
+                *   *Processing Volume Trend:* Use Recharts `LineChart`. Pass `metrics.documentMetrics.processingVolume` (formatted dates for X-axis, count for Y-axis). Consider adding average processing time as another line if data allows.
+            *   **Distribution Tab:**
+                *   *Document Status:* Use Recharts `BarChart` or `PieChart`. Pass `metrics.documentMetrics.statusDistribution` (formatted `status` for labels, `count` for values).
+                *   *Common Errors:* Display `metrics.documentMetrics.topErrors` in a list or simple bar chart within its `Card`.
+            *   **Efficiency Tab:**
+                *   Use the `ProgressMetric` components as currently implemented, feeding them data from `metrics.usageMetrics` and `metrics.documentMetrics.successRate`.
+        *   **CSV Export:** Implement the `downloadMetricsCSV` function to correctly format all fetched metrics data into a CSV string and trigger a download.
+        *   **Loading/Error States:** Ensure skeletons are shown during `isLoading` and error messages (`Alert`) are displayed when `error` state is set.
+    3.  **Backend Action (`actions/db/metrics-actions.ts`)**:
+        *   Ensure `fetchUserMetricsAction` correctly queries and aggregates data from `documents`, `extraction_jobs`, and `user_usage` tables based on the provided `dateRange` and `userId`.
+        *   Verify calculations for `successRate` and `averageProcessingTime` are correct and handle potential division by zero.
+        *   Ensure the structure of the returned data matches what the frontend expects for cards and charts.
+
+**Step 5.8: Implement Unified Settings Page (Incorporating Billing)**
+
+*   [] **Task**: Consolidate Profile, App Preferences, Notifications, Privacy, and Billing management into the `settings/page.tsx`. Remove the need for a separate `/billing` page.
+*   **Files**:
+    *   `app/(dashboard)/dashboard/settings/page.tsx`: Client component (Primary focus).
+    *   `app/(dashboard)/dashboard/profile/[[...rest]]/page.tsx`: Keep this for Clerk's `<UserProfile>` component routing.
+    *   `actions/db/users-actions.ts`: `getCurrentUserDataAction`, `updateUserIdentityAction`.
+    *   `actions/db/profiles-actions.ts`: `getProfileByUserIdAction`.
+    *   `actions/stripe/checkout-actions.ts`: `createCheckoutSessionAction`, `createBillingPortalSessionAction`.
+    *   `actions/db/user-usage-actions.ts`: `getCurrentUserUsageAction`.
+    *   `lib/config/subscription-plans.ts`: To display plan details.
+    *   `components/ui/card.tsx`, `components/ui/tabs.tsx`, `components/ui/select.tsx`, `components/ui/switch.tsx`, `components/ui/button.tsx`, `components/ui/label.tsx`, `components/ui/separator.tsx`.
+*   **Step Dependencies**: 1.9, 3.1, 4.1, 4.6, 6.2, 6.3.
+*   **User Instructions**:
+    1.  **Structure (`settings/page.tsx`)**:
+        *   Use `Tabs` to organize settings: "Profile", "Preferences", "Notifications", "Privacy", "Subscription & Billing".
+    2.  **Data Fetching (`settings/page.tsx`)**:
+        *   Use `useEffect` to fetch initial data:
+            *   `getCurrentUserDataAction` for `users.metadata`.
+            *   `getProfileByUserIdAction` for `membership`, `stripeCustomerId`.
+            *   `getCurrentUserUsageAction` for current page usage.
+        *   Manage a combined loading state.
+    3.  **Profile Tab**:
+        *   Render the Clerk `<UserProfile path="/dashboard/profile" routing="path" />` component directly within this tab content. Clerk handles fetching and updating profile details (name, email, password, MFA).
+    4.  **Preferences Tab**:
+        *   Use `useState` for `theme`, `language`, `dateFormat`, `timeFormat`, loading initial values from fetched `userData.metadata`.
+        *   Render `Select` components for each preference.
+        *   Implement a "Save Preferences" button.
+    5.  **Notifications Tab**:
+        *   Use `useState` for `notifyProcessing`, `notifyErrors`, `notifySummary`, loading initial values from `userData.metadata.notificationSettings`.
+        *   Render `Switch` components for each notification type.
+        *   Implement a "Save Notifications" button.
+    6.  **Privacy Tab**:
+        *   Use `useState` for `dataAnalytics`, `dataStorage`, loading initial values from `userData.metadata.privacySettings`.
+        *   Render `Switch` components for each privacy setting.
+        *   Implement a "Save Privacy Settings" button.
+        *   Add a section for "Export Data" (Button could trigger a server action to *initiate* an export job, not download immediately).
+        *   Add a section for "Delete Account" (Button triggers a confirmation `AlertDialog`, then calls a *new* server action to handle account deletion - complex, might defer post-MVP).
+    7.  **Subscription & Billing Tab**:
+        *   Display the user's current plan (`profileData.membership`) using details from `subscriptionPlans`.
+        *   Display current usage (`usageData.pagesProcessed` / `usageData.pagesLimit`). Include a progress bar (`ProgressMetric`).
+        *   Display available plans (map over `subscriptionPlans`). For each *paid* plan different from the current one, show an "Upgrade" or "Change Plan" button.
+        *   **Upgrade/Change Button Logic:**
             *   Use `useTransition`.
             *   Call `createCheckoutSessionAction` with the target `planId`.
-            *   On success, redirect the user to the returned Stripe `url`.
-            *   Show errors via `toast`.
-        *   Implement "Manage Billing" button:
-            *   Show only if `profile.stripeCustomerId` exists.
+            *   On success, use `window.location.href = result.data.url` to redirect to Stripe Checkout.
+            *   Handle errors with `toast`.
+        *   **Manage Billing Button Logic:**
+            *   Show *only* if `profileData.stripeCustomerId` exists.
             *   Use `useTransition`.
             *   Call `createBillingPortalSessionAction`.
-            *   On success, redirect user to the returned Stripe Portal `url`.
-            *   Show errors via `toast`.
+            *   On success, use `window.location.href = result.data.url` to redirect to Stripe Billing Portal.
+            *   Handle errors with `toast`.
+    8.  **Saving App Settings (Preferences, Notifications, Privacy)**:
+        *   Create a single `handleSaveAppSettings` function (or separate ones per tab).
+        *   Use `useTransition`.
+        *   Bundle the relevant state variables (`theme`, `language`, etc.) into the `metadata` object structure defined in `settings/page.tsx`.
+        *   Call `updateUserIdentityAction` passing the `userId` and the updated `metadata` object.
+        *   Show success/error `toast` based on the action result. Update local `userData` state on success.
+    9.  **Backend Actions**:
+        *   Ensure `updateUserIdentityAction` correctly accepts and updates the `metadata` JSONB field in the `users` table.
+        *   Verify `createCheckoutSessionAction` and `createBillingPortalSessionAction` work as expected.
 
--   [ ] **Step 5.10: Implement Dashboard Page**
-    *   **Task**: Connect the main Dashboard page (`dashboard/page.tsx`) to display real summary data.
-    *   **Files**: `app/(dashboard)/dashboard/page.tsx`.
-    *   **Step Dependencies**: Actions created in 5.6, 5.7.
-    *   **User Instructions**:
-        *   Use `useEffect` or server-side fetching to call actions like `fetchUserDocumentsAction` (with limit 5, sorted by date) and `fetchUserUsageMetricsAction`.
-        *   Populate the summary cards (Total Documents, Processing Rate, Usage, etc.) with the fetched data.
-        *   Populate the "Recent Documents" list.
-        *   Replace chart placeholders with actual chart components if implementing charts, feeding them fetched data.
-        *   Ensure links/buttons navigate to the correct pages (Upload, History, etc.).
+
+**Step 5.9: Implement Dashboard Page **
+
+*   [] **Task**: Enhance the main Dashboard page (`dashboard/page.tsx`) to display meaningful summary data and visualizations based on fetched metrics and recent documents.
+*   **Files**:
+    *   `app/(dashboard)/dashboard/page.tsx`: Client component.
+    *   `actions/db/metrics-actions.ts`: `fetchUserMetricsAction`.
+    *   `actions/db/documents.ts`: `fetchUserDocumentsAction`.
+    *   `components/ui/card.tsx`, `components/ui/skeleton.tsx`, `components/ui/button.tsx`, `components/ui/badge.tsx`.
+    *   Use the *actual* chart components implemented in Step 5.7 (e.g., Recharts `LineChart`, `PieChart`).
+*   **Step Dependencies**: Actions created in 5.6, 5.7.
+*   **User Instructions**:
+    1.  **Data Fetching (`dashboard/page.tsx`)**:
+        *   Use `useEffect` to fetch data on mount:
+            *   Call `fetchUserMetricsAction` (without a date range, or default to last 30 days) to get summary stats.
+            *   Call `fetchUserDocumentsAction` with `pageSize: 5`, `sortBy: 'createdAt'`, `sortOrder: 'desc'` to get recent documents.
+        *   Manage `isLoading` and `error` states.
+    2.  **UI Implementation (`dashboard/page.tsx`)**:
+        *   **Summary Cards:** Populate the four main `Card` components:
+            *   "Total Documents": Use `metrics.documentMetrics.totalDocuments`.
+            *   "Processing Rate": Use `metrics.documentMetrics.successRate`.
+            *   "Pages Usage": Display `metrics.usageMetrics.pagesProcessed` / `metrics.usageMetrics.pagesLimit`. Show percentage.
+            *   "Avg. Processing Time": Use `metrics.documentMetrics.averageProcessingTime` (formatted).
+        *   **Recent Activity Chart:**
+            *   Replace the placeholder with a functional Recharts `LineChart`.
+            *   Use `metrics.documentMetrics.processingVolume` as the data source. Format dates for the X-axis.
+        *   **Recent Documents List:**
+            *   Populate the list using the fetched `recentDocuments` state.
+            *   Use `FileText`, `formatDistanceToNow`, status badges (`getStatusIcon`, `getStatusColorClasses`).
+            *   Ensure the "View All" button links correctly to `/dashboard/history`.
+            *   Ensure each document links to its review page (`/dashboard/review/[id]`).
+        *   **Loading/Empty States:** Use `Skeleton` components for cards and lists while `isLoading`. Show appropriate messages if no metrics or recent documents are available.
 
 ---
 
