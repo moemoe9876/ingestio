@@ -71,11 +71,6 @@ const navMain = [
 
 const navSecondary = [
   {
-    title: "Profile",
-    url: "/dashboard/profile",
-    icon: User,
-  },
-  {
     title: "Settings",
     url: "/dashboard/settings",
     icon: Settings,

@@ -2,14 +2,19 @@
 
 import { fetchUserDocumentsAction } from "@/actions/db/documents";
 import { fetchUserMetricsAction } from "@/actions/db/metrics-actions";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { LineChartComponent, PieChartComponent } from "@/components/ui/charts";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricCard } from "@/components/ui/metric-card";
+import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { SelectDocument } from "@/db/schema";
 import { useUser } from "@clerk/nextjs";
-import { formatDistanceToNow } from "date-fns";
-import { ChevronRight, FileText } from "lucide-react";
+import { differenceInDays, formatDistanceToNow } from "date-fns";
+import { AlertTriangle, CheckCircle2, Clock, Eye, FileText, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -17,30 +22,39 @@ export default function DashboardPage() {
   const { user } = useUser();
   const [isLoading, setIsLoading] = useState(true);
   const [metrics, setMetrics] = useState<any>(null);
-  const [recentDocuments, setRecentDocuments] = useState<any[]>([]);
+  const [recentDocuments, setRecentDocuments] = useState<SelectDocument[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchDashboardData() {
       setIsLoading(true);
+      setError(null);
       try {
-        // Fetch metrics data
-        const metricsResult = await fetchUserMetricsAction();
+        // Fetch metrics and recent documents in parallel
+        const [metricsResult, recentDocsResult] = await Promise.all([
+          fetchUserMetricsAction(),
+          fetchUserDocumentsAction({
+            page: 1,
+            pageSize: 7,
+            sortBy: "createdAt",
+            sortOrder: "desc"
+          })
+        ]);
+
         if (metricsResult.isSuccess) {
           setMetrics(metricsResult.data);
+        } else {
+          setError(metricsResult.message);
         }
 
-        // Fetch recent documents
-        const recentDocsResult = await fetchUserDocumentsAction({
-          page: 1,
-          pageSize: 5,
-          sortBy: "createdAt",
-          sortOrder: "desc"
-        });
         if (recentDocsResult.isSuccess) {
           setRecentDocuments(recentDocsResult.data.documents);
+        } else {
+          setError(prev => prev || recentDocsResult.message);
         }
       } catch (error) {
         console.error("Error fetching dashboard data:", error);
+        setError("Failed to load dashboard data");
       } finally {
         setIsLoading(false);
       }
@@ -49,290 +63,255 @@ export default function DashboardPage() {
     fetchDashboardData();
   }, []);
 
-  // Calculate accuracy from metrics if available
-  const getAccuracy = () => {
-    if (metrics?.documentMetrics?.successRate) {
-      return metrics.documentMetrics.successRate;
+  // Calculate days left in billing cycle
+  const getDaysLeftInBillingCycle = () => {
+    if (!metrics?.usageMetrics?.billingPeriodEnd) return "N/A";
+    
+    const billingEndDate = new Date(metrics.usageMetrics.billingPeriodEnd);
+    const today = new Date();
+    const daysLeft = differenceInDays(billingEndDate, today);
+    
+    return daysLeft > 0 ? daysLeft : 0;
+  };
+
+  // Format file size helper
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
+  };
+
+  // Get file icon based on mimetype
+  const getFileIcon = (mimeType: string) => {
+    // Could be extended with different icons based on file type
+    return <FileText className="h-8 w-8 text-primary/70" />;
+  };
+
+  // Get status color for badge
+  const getStatusColorClasses = (status: string) => {
+    switch (status) {
+      case "completed":
+        return "bg-green-500/20 text-green-500 hover:bg-green-500/30";
+      case "processing":
+        return "bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30";
+      case "failed":
+        return "bg-red-500/20 text-red-500 hover:bg-red-500/30";
+      default:
+        return "bg-blue-500/20 text-blue-500 hover:bg-blue-500/30";
     }
-    return 95; // Fallback value
+  };
+
+  // Get status icon
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "completed":
+        return <CheckCircle2 className="h-3 w-3" />;
+      case "processing":
+        return <Clock className="h-3 w-3" />;
+      case "failed":
+        return <AlertTriangle className="h-3 w-3" />;
+      default:
+        return <UploadCloud className="h-3 w-3" />;
+    }
   };
 
   return (
     <div className="flex flex-col gap-4">
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-bold tracking-tight">
           Welcome, {user?.firstName || "User"}
         </h2>
       </div>
       
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="rounded-md">
-          <TabsTrigger value="overview" className="rounded-md">Overview</TabsTrigger>
-          <TabsTrigger value="analytics" className="rounded-md">Analytics</TabsTrigger>
-          <TabsTrigger value="reports" className="rounded-md">Reports</TabsTrigger>
-        </TabsList>
+      {/* KPI Row */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <MetricCard
+          title="Total Documents"
+          value={isLoading ? "..." : metrics?.documentMetrics?.totalDocuments || 0}
+          description="Documents processed"
+          icon={FileText}
+          isLoading={isLoading}
+        />
         
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="rounded-lg overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Documents</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : (
-                  <>
-                    <div className="text-2xl font-bold">{metrics?.documentMetrics?.totalDocuments || 0}</div>
-                    <p className="text-xs text-muted-foreground">
-                      Documents processed
-                    </p>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-            
-            <Card className="rounded-lg overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Processing Rate</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : (
-                  <>
-                    <div className="text-2xl font-bold">{getAccuracy()}%</div>
-                    <p className="text-xs text-muted-foreground">
-                      Success rate
-                    </p>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-            
-            <Card className="rounded-lg overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pages Usage</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : (
-                  <>
-                    <div className="text-2xl font-bold">
-                      {metrics?.usageMetrics?.pagesProcessed || 0}/{metrics?.usageMetrics?.pagesLimit || 0}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {metrics?.usageMetrics?.usagePercentage || 0}% of monthly allocation
-                    </p>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-            
-            <Card className="rounded-lg overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Processing Time</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : (
-                  <>
-                    <div className="text-2xl font-bold">
-                      {metrics?.documentMetrics?.averageProcessingTime 
-                        ? `${Math.round(metrics.documentMetrics.averageProcessingTime)}s` 
-                        : "N/A"}
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Average extraction time
-                    </p>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-          
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-            <Card className="col-span-4 rounded-lg overflow-hidden">
-              <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-                <CardDescription>
-                  Document processing volume over time.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="h-[300px] bg-muted/10 rounded-lg flex items-center justify-center">
-                    <Skeleton className="h-64 w-full" />
-                  </div>
-                ) : metrics?.documentMetrics?.processingVolume ? (
-                  <div className="h-[300px]">
-                    <LineChartComponent
-                      title=""
-                      data={metrics.documentMetrics.processingVolume.map((item: any) => ({
-                        label: item.date,
-                        value: item.count
-                      }))}
-                      height={300}
-                    />
-                  </div>
-                ) : (
-                  <div className="h-[300px] bg-muted/10 rounded-lg flex items-center justify-center">
-                    <p className="text-muted-foreground">No activity data available</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            
-            <Card className="col-span-3 rounded-lg overflow-hidden">
-              <CardHeader className="flex justify-between items-start">
-                <div>
-                  <CardTitle>Recent Documents</CardTitle>
-                  <CardDescription>
-                    Your latest processed documents.
-                  </CardDescription>
-                </div>
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/dashboard/history">
-                    View All
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                  </Link>
+        <MetricCard
+          title="Avg. Processing Time"
+          value={isLoading ? "..." : metrics?.documentMetrics?.averageProcessingTime
+            ? `${Math.round(metrics.documentMetrics.averageProcessingTime)}s`
+            : "N/A"}
+          description="Average extraction time"
+          icon={Clock}
+          isLoading={isLoading}
+        />
+        
+        <MetricCard
+          title="Success Rate"
+          value={isLoading ? "..." : `${metrics?.documentMetrics?.successRate || 0}%`}
+          description="Processing success rate"
+          icon={CheckCircle2}
+          isLoading={isLoading}
+        />
+      </div>
+      
+      {/* Main Content Area (Two Columns) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column (Wider) */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Quick Upload Card */}
+          <Card className="border-border overflow-hidden">
+            <CardContent className="pt-6 flex flex-col md:flex-row items-center gap-4">
+              <div className="flex-shrink-0 bg-primary/10 p-4 rounded-full">
+                <UploadCloud className="h-12 w-12 text-primary" />
+              </div>
+              <div className="flex-grow text-center md:text-left">
+                <h3 className="text-xl font-semibold mb-2">Upload New Document</h3>
+                <p className="text-muted-foreground mb-4">
+                  Process your documents to extract structured data
+                </p>
+                <Button asChild size="lg" className="mt-2">
+                  <Link href="/dashboard/upload">Upload Document</Link>
                 </Button>
-              </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="space-y-4">
-                    {Array.from({length: 3}).map((_, i) => (
-                      <Skeleton key={i} className="h-16 w-full" />
-                    ))}
+              </div>
+            </CardContent>
+          </Card>
+          
+          {/* Usage Snapshot Card */}
+          <Card className="border-border overflow-hidden">
+            <CardHeader>
+              <CardTitle>Current Usage</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isLoading ? (
+                <>
+                  <Skeleton className="h-5 w-full max-w-[250px] mb-2" />
+                  <Skeleton className="h-4 w-full mb-4" />
+                  <Skeleton className="h-4 w-24" />
+                </>
+              ) : metrics?.usageMetrics ? (
+                <>
+                  <div>
+                    <p className="mb-2 font-medium">
+                      {metrics.usageMetrics.pagesProcessed} / {metrics.usageMetrics.pagesLimit} pages used
+                    </p>
+                    <Progress value={metrics.usageMetrics.usagePercentage} className="h-2" />
                   </div>
-                ) : recentDocuments.length > 0 ? (
-                  <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    {getDaysLeftInBillingCycle()} days left in current billing cycle
+                  </p>
+                </>
+              ) : (
+                <p className="text-muted-foreground">No usage data available</p>
+              )}
+            </CardContent>
+            <CardFooter>
+              <Button variant="outline" size="sm" asChild className="hover:bg-accent hover:text-accent-foreground transition-colors">
+                <Link href="/dashboard/settings?tab=billing">Manage Subscription</Link>
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+        
+        {/* Right Column (Narrower) */}
+        <div className="lg:col-span-1">
+          {/* Recent Documents Feed Card */}
+          <Card className="border-border h-full overflow-hidden">
+            <CardHeader>
+              <CardTitle>Recent Documents</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="space-y-4">
+                  {Array.from({length: 5}).map((_, i) => (
+                    <Skeleton key={i} className="h-16 w-full" />
+                  ))}
+                </div>
+              ) : recentDocuments.length > 0 ? (
+                <ScrollArea className="h-[400px] pr-4">
+                  <div className="space-y-3">
                     {recentDocuments.map((doc) => (
                       <Link 
                         href={`/dashboard/review/${doc.id}`}
                         key={doc.id} 
-                        className="flex items-center gap-4 rounded-lg border p-3 hover:bg-muted/50 transition-colors"
+                        className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors group"
                       >
-                        <FileText className="h-9 w-9 text-primary/70" />
-                        <div className="flex-1 space-y-1 overflow-hidden">
-                          <p className="text-sm font-medium truncate">{doc.originalFilename}</p>
+                        {getFileIcon(doc.mimeType)}
+                        <div className="flex-1 min-w-0">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <p className="text-sm font-medium truncate">
+                                  {doc.originalFilename}
+                                </p>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{doc.originalFilename}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatFileSize(doc.fileSize)} • {doc.pageCount} {doc.pageCount === 1 ? 'page' : 'pages'}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           <p className="text-xs text-muted-foreground">
                             {formatDistanceToNow(new Date(doc.createdAt), { addSuffix: true })}
-                            <span className="mx-2">•</span>
-                            <span className="capitalize">{doc.status}</span>
                           </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className={`text-xs font-medium ${
-                            doc.status === "completed" ? "text-green-500" : 
-                            doc.status === "failed" ? "text-red-500" : 
-                            "text-yellow-500"
-                          }`}>
-                            {doc.status === "completed" ? "Completed" : 
-                             doc.status === "processing" ? "Processing" :
-                             doc.status === "failed" ? "Failed" : "Uploaded"}
-                          </div>
+                        <Badge 
+                          variant="outline"
+                          className={`capitalize ml-auto ${getStatusColorClasses(doc.status)}`}
+                        >
+                          <span className="flex items-center gap-1">
+                            {getStatusIcon(doc.status)}
+                            <span>{doc.status}</span>
+                          </span>
+                        </Badge>
+                        <div className="hidden group-hover:flex items-center gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8"
+                            asChild
+                          >
+                            <Link href={`/dashboard/review/${doc.id}`}>
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">View</span>
+                            </Link>
+                          </Button>
+                          {/* Note: Delete functionality would need an action handler */}
                         </div>
                       </Link>
                     ))}
                   </div>
-                ) : (
-                  <div className="py-8 text-center">
-                    <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                    <h3 className="mt-4 text-sm font-medium">No documents yet</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Upload your first document to get started.
-                    </p>
-                    <Button className="mt-4" asChild>
-                      <Link href="/dashboard/upload">Upload Document</Link>
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-        
-        <TabsContent value="analytics" className="space-y-4">
-          {isLoading ? (
-            <div className="space-y-4">
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-[450px] w-full" />
-            </div>
-          ) : metrics ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              <PieChartComponent
-                title="Document Status Distribution"
-                description="Breakdown of documents by processing status"
-                data={metrics.documentMetrics.statusDistribution.map((item: any) => ({
-                  label: item.status === "completed" ? "Completed" : 
-                         item.status === "processing" ? "Processing" :
-                         item.status === "failed" ? "Failed" : "Uploaded",
-                  count: item.count
-                }))}
-              />
-              <PieChartComponent
-                title="Document Type Distribution"
-                description="Breakdown of documents by MIME type"
-                data={metrics.documentMetrics.docTypeDistribution.map((item: any) => ({
-                  label: item.mimeType.split('/')[1] || item.mimeType,
-                  count: item.count
-                }))}
-              />
-            </div>
-          ) : (
-            <Card className="rounded-lg overflow-hidden">
-              <CardHeader>
-                <CardTitle>Analytics Content</CardTitle>
-                <CardDescription>
-                  No analytics data available yet.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[450px] bg-muted/10 rounded-lg flex items-center justify-center">
-                  <p className="text-muted-foreground">Process some documents to see analytics</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-        
-        <TabsContent value="reports" className="space-y-4">
-          <Card className="rounded-lg overflow-hidden">
-            <CardHeader className="flex justify-between items-start">
-              <div>
-                <CardTitle>Error Reports</CardTitle>
-                <CardDescription>
-                  Most common errors encountered during processing.
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="h-[450px] bg-muted/10 rounded-lg flex items-center justify-center">
-                  <Skeleton className="h-64 w-full" />
-                </div>
-              ) : metrics?.documentMetrics?.topErrors && metrics.documentMetrics.topErrors.length > 0 ? (
-                <div className="space-y-4">
-                  {metrics.documentMetrics.topErrors.map((error: any, index: number) => (
-                    <div key={index} className="border p-4 rounded-lg">
-                      <div className="text-sm font-medium text-red-500 mb-1">Error #{index + 1}</div>
-                      <div className="text-sm">{error.error}</div>
-                      <div className="text-xs text-muted-foreground mt-1">Occurred {error.count} time(s)</div>
-                    </div>
-                  ))}
-                </div>
+                </ScrollArea>
               ) : (
-                <div className="h-[450px] bg-muted/10 rounded-lg flex items-center justify-center">
-                  <p className="text-muted-foreground">No errors to report. Great job!</p>
+                <div className="py-8 text-center">
+                  <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
+                  <h3 className="mt-4 text-sm font-medium">No documents yet</h3>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Upload your first document to get started.
+                  </p>
+                  <Button className="mt-4" asChild>
+                    <Link href="/dashboard/upload">Upload Document</Link>
+                  </Button>
                 </div>
               )}
             </CardContent>
+            {recentDocuments.length > 0 && (
+              <CardFooter>
+                <Button variant="secondary" size="sm" asChild className="w-full">
+                  <Link href="/dashboard/history">View All History</Link>
+                </Button>
+              </CardFooter>
+            )}
           </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </div>
   );
 } 
