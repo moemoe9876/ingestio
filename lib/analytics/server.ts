@@ -1,39 +1,42 @@
 import { PostHog } from "posthog-node";
 
-// Initialize PostHog client for server-side tracking
-let posthogInstance: PostHog | null = null;
+let posthogClientInstance: PostHog | null = null;
 
-/**
- * Get or create the PostHog client instance for server-side event tracking
- */
-export function getPostHogClient(): PostHog {
-  if (!posthogInstance) {
+export function getPostHogServerClient(): PostHog {
+  if (!posthogClientInstance) {
     const apiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
-    const host = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com";
-    
+    const host = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com"; // Or your region
+
     if (!apiKey) {
-      throw new Error("Missing NEXT_PUBLIC_POSTHOG_KEY environment variable");
+      // Fallback or throw error - depends on if observability is critical
+      console.warn("PostHog API Key not found for server client. LLM Observability disabled.");
+      // Return a mock client or handle appropriately
+      // Using 'any' to bypass strict type checking for the mock object
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return { capture: async () => {}, shutdown: async () => {} } as any;
     }
-    
-    posthogInstance = new PostHog(apiKey, {
-      host,
+
+    posthogClientInstance = new PostHog(apiKey, {
+      host: host,
       flushAt: 1, // Send events immediately
       flushInterval: 0,
+      // Optional: Disable if you encounter issues during build/serverless init
+      // enable: process.env.NODE_ENV === 'production',
     });
+    console.log("PostHog Server Client Initialized.");
   }
-  
-  return posthogInstance;
+  return posthogClientInstance;
 }
 
-/**
- * Flush any pending events and shut down the PostHog client
- * Call this when your application is shutting down
- */
+// Optional: Function to gracefully shutdown
 export async function shutdownPostHogClient(): Promise<void> {
-  if (posthogInstance) {
+  const client = getPostHogServerClient();
+  // Check if the client is not the mock object and has a shutdown method
+  if (client && typeof client.shutdown === 'function') {
     try {
-      await posthogInstance.shutdown();
-      posthogInstance = null;
+      await client.shutdown();
+      posthogClientInstance = null;
+      console.log("PostHog Server Client Shutdown.");
     } catch (error) {
       console.error("Error shutting down PostHog client:", error);
     }
@@ -49,7 +52,7 @@ export async function trackServerEvent(
   properties?: Record<string, any>
 ) {
   try {
-    const client = getPostHogClient();
+    const client = getPostHogServerClient();
     await client.capture({
       distinctId: userId,
       event: eventName,
@@ -68,7 +71,7 @@ export async function identifyServerUser(
   userProperties?: Record<string, any>
 ) {
   try {
-    const client = getPostHogClient();
+    const client = getPostHogServerClient();
     await client.identify({
       distinctId: userId,
       properties: userProperties

@@ -1189,27 +1189,170 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 ---
 
-## Section 7: Analytics Integration (PostHog & Helicone)
+**Section 7: LLM Observability (PostHog)**
 
--   [ ] **Step 7.1: Implement Analytics Utility Functions**
-    -   **Task**: Create helper functions for tracking.
+-   [ ] **Step 7.1: Configure PostHog SDK for LLM Observability**
+    -   **Task**: Set up the necessary PostHog Node.js client instance specifically for use with the `@posthog/ai` wrapper in your AI actions. Ensure environment variables are correctly configured.
     -   **Files**:
-        -   `lib/analytics/client.ts`: Client-side helpers.
-        -   `lib/analytics/server.ts`: Server-side helpers.
-    -   **Step Dependencies**: 1.6
-    -   **User Instructions**: Define event taxonomy.
+        -   `lib/analytics/server.ts`: (Can be simplified or renamed, e.g., `lib/posthog/server-client.ts`). This file will *only* initialize and export the `posthog-node` client instance needed by `@posthog/ai`. **Crucially, ensure this file is NOT imported by any client components or shared barrel files used by the client.**
+        -   `.env.local` / Vercel Env Vars: `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`. (Note: `posthog-node` uses the *public* key, same as the client).
+    -   **Step Dependencies**: 1.6 (Env Vars)
+    -   **User Instructions**:
+        1.  **Environment Variables**: Verify `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` are set.
+        2.  **Initialize PostHog Node Client**: In `lib/analytics/server.ts` (or a new dedicated file like `lib/posthog/server-client.ts`), initialize the `posthog-node` client. **Do not export anything else from this file if it might be imported elsewhere.**
+            ```typescript
+            // lib/analytics/server.ts OR lib/posthog/server-client.ts
+            import { PostHog } from "posthog-node";
 
--   [ ] **Step 7.2: Integrate Event Tracking**
-    -   **Task**: Add tracking calls throughout the application.
-    -   **Files**: Client Components, Server Actions, Webhook Routes.
-    -   **Step Dependencies**: 7.1, All functional sections.
-    -   **User Instructions**: Track meaningful events with properties.
+            let posthogClientInstance: PostHog | null = null;
 
--   [ ] **Step 7.3: Verify Helicone Integration**
-    -   **Task**: Confirm LLM calls appear in Helicone.
-    -   **Files**: None (Verification)
-    -   **Step Dependencies**: 1.7, 4.3, 4.4
-    -   **User Instructions**: Test AI calls. Check Helicone dashboard.
+            export function getPostHogServerClient(): PostHog {
+              if (!posthogClientInstance) {
+                const apiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+                const host = process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://eu.i.posthog.com"; // Or your region
+
+                if (!apiKey) {
+                  // Fallback or throw error - depends on if observability is critical
+                  console.warn("PostHog API Key not found for server client. LLM Observability disabled.");
+                  // Return a mock client or handle appropriately
+                  return { capture: async () => {}, shutdown: async () => {} } as any;
+                }
+
+                posthogClientInstance = new PostHog(apiKey, {
+                  host: host,
+                  flushAt: 1, // Send events immediately
+                  flushInterval: 0,
+                  // Optional: Disable if you encounter issues during build/serverless init
+                  // enable: process.env.NODE_ENV === 'production',
+                });
+                console.log("PostHog Server Client Initialized.");
+              }
+              return posthogClientInstance;
+            }
+
+            // Optional: Function to gracefully shutdown
+            export async function shutdownPostHogClient(): Promise<void> {
+              const client = getPostHogServerClient();
+              if (client && typeof client.shutdown === 'function') {
+                try {
+                  await client.shutdown();
+                  posthogClientInstance = null;
+                  console.log("PostHog Server Client Shutdown.");
+                } catch (error) {
+                  console.error("Error shutting down PostHog client:", error);
+                }
+              }
+            }
+            ```
+        3.  **Remove Standard Tracking Utilities**: Delete `lib/analytics/client.ts` and `lib/analytics/index.ts` if they exist, as standard event tracking is removed for MVP. Remove any `trackEvent` or `trackServerEvent` calls from components/actions *except* for the LLM observability part in the next step.
+        4.  **Keep Basic PostHog Setup**: Retain `components/utilities/posthog/posthog-provider.tsx` and `components/utilities/posthog/posthog-user-identity.tsx` in `app/layout.tsx` for basic user identification and page view tracking, which are generally useful.
+
+---
+
+-   [ ] **Step 7.2: Implement PostHog LLM Observability using `@posthog/ai`**
+    -   **Status**: Not Implemented.
+    -   **Task**: Wrap Vertex AI model calls within your AI actions (`actions/ai/extraction-actions.ts`) using the `@posthog/ai` `withTracing` function to automatically capture `$ai_generation` events.
+    -   **Files**:
+        -   `actions/ai/extraction-actions.ts`: Modify AI SDK calls (`generateObject`, `generateText`).
+        -   `lib/analytics/server.ts` (or `lib/posthog/server-client.ts`): Provides the initialized `posthog-node` client instance.
+        -   `lib/ai/vertex-client.ts`: Provides the base Vertex AI model instances (`getVertexModel`, `getVertexStructuredModel`).
+    -   **Step Dependencies**: 1.7 (Vertex AI Setup), 4.3/4.4 (AI Actions), 7.1 (PostHog Server Client Setup)
+    -   **User Instructions**:
+        1.  **Install Dependency**: Ensure `@posthog/ai` is installed: `pnpm add @posthog/ai`. Also ensure `posthog-node` is installed: `pnpm add posthog-node`.
+        2.  **Import Wrapper & Client**: In `actions/ai/extraction-actions.ts`, import `withTracing` and your PostHog server client getter.
+            ```typescript
+            // actions/ai/extraction-actions.ts
+            import { withTracing } from '@posthog/ai';
+            import { getPostHogServerClient } from '@/lib/analytics/server'; // Adjust path if you renamed/moved the file
+            import { getVertexModel, getVertexStructuredModel, VERTEX_MODELS } from '@/lib/ai/vertex-client';
+            import { generateObject, generateText } from 'ai';
+            import { randomUUID } from 'crypto'; // For generating trace IDs
+            import { getCurrentUser } from '@/lib/auth-utils';
+            // ... other imports ...
+
+            const phClient = getPostHogServerClient();
+            ```
+        3.  **Wrap Model Calls**: Inside functions like `extractDocumentDataAction` (or any function calling `generateObject`/`generateText`), wrap the model *before* passing it to the AI SDK function.
+            ```typescript
+            // Example inside extractDocumentDataAction
+            // ... (authentication, validation, get document, etc.) ...
+            const userId = await getCurrentUser();
+            const traceId = randomUUID(); // Unique ID for this specific extraction flow
+
+            try {
+              // Get the base model instance
+              const baseModel = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
+
+              // Wrap the model instance with tracing context
+              const observableModel = withTracing(
+                baseModel,
+                phClient,
+                {
+                  posthogDistinctId: userId, // Link event to the user
+                  posthogTraceId: traceId,   // Group related AI steps if needed
+                  posthogProperties: {       // Add custom context
+                    documentId: documentId,
+                    actionName: 'extractDocumentDataAction', // Identify the action
+                    promptUsed: enhancedPrompt, // Log the specific prompt
+                    tier: tier, // Log user tier
+                    // Add any other relevant properties
+                  },
+                  // posthogPrivacyMode: true, // Set true to exclude input/output content
+                }
+              );
+
+              // Use the wrapped model in the AI SDK call
+              const result = await generateObject({
+                model: observableModel, // Pass the wrapped model here
+                schema: z.record(z.any()), // Or your specific Zod schema
+                messages: [
+                  { role: "system", content: contextualSystemInstructions },
+                  {
+                    role: "user",
+                    content: [
+                      { type: "text", text: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type}` },
+                      { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: document.mime_type }
+                    ]
+                  }
+                ]
+              });
+
+              const rawExtractedData = result.object;
+              extractedData = filterExtractedData(rawExtractedData, requestedFields);
+              // The $ai_generation event is captured automatically by withTracing on success
+
+              // ... (save data, update job/document status) ...
+
+              // Optional: Capture a standard event *after* successful processing if needed
+              // await trackServerEvent('extraction_processing_successful', userId, { documentId, traceId });
+
+              return { isSuccess: true, message: "Extraction successful", data: extractedData };
+
+            } catch (aiError: unknown) {
+              // Error is automatically captured by withTracing, including $ai_is_error: true and $ai_error
+              const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
+              console.error("AI extraction error (captured by PostHog):", errorMessage);
+
+              // Optional: Capture a standard event for failure if needed
+              // await trackServerEvent('extraction_processing_failed', userId, { documentId, traceId, error: errorMessage });
+
+              // ... (update job status to failed, etc.) ...
+
+              return {
+                isSuccess: false,
+                message: `AI extraction failed: ${errorMessage}`
+              };
+            }
+            ```
+        4.  **Repeat Wrapping**: Apply the `withTracing` wrapper to *all* instances where you call `generateObject` or `generateText` within your AI actions (`extractTextAction`, `extractInvoiceDataAction`, etc.), ensuring you pass the `userId` and a relevant `traceId`.
+        5.  **Verification**:
+            *   Run the document upload and extraction flow.
+            *   Check the PostHog "Events" tab for `$ai_generation` events.
+            *   Verify the events contain properties like `$ai_model`, `$ai_provider`, `$ai_latency`, `$ai_trace_id`, `distinct_id` (should match the `userId`), and your custom `posthogProperties`.
+            *   Test error scenarios (e.g., invalid prompt, model error) and verify error events are captured with `$ai_is_error: true` and `$ai_error`.
+            *   If you have the LLM Observability feature preview enabled in PostHog, explore its dedicated views.
+
+---
 
 ## Section 8: Batch Processing Feature
 
