@@ -782,7 +782,7 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 **Step 5.7: Implement Metrics Page (Enhanced Visualization)**
 
-*   [] **Task**: Build the Metrics page (`metrics/page.tsx`) with functional charts displaying relevant data fetched via `fetchUserMetricsAction`.
+*   [x] **Task**: Build the Metrics page (`metrics/page.tsx`) with functional charts displaying relevant data fetched via `fetchUserMetricsAction`.
 *   **Files**:
     *   `app/(dashboard)/dashboard/metrics/page.tsx`: Client component.
     *   `actions/db/metrics-actions.ts`: Implement `fetchUserMetricsAction`.
@@ -817,7 +817,7 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 **Step 5.8: Implement Unified Settings Page (Incorporating Billing)**
 
-*   [] **Task**: Consolidate Profile, App Preferences, Notifications, Privacy, and Billing management into the `settings/page.tsx`. Remove the need for a separate `/billing` page.
+*   [x] **Task**: Consolidate Profile, App Preferences, Notifications, Privacy, and Billing management into the `settings/page.tsx`. Remove the need for a separate `/billing` page.
 *   **Files**:
     *   `app/(dashboard)/dashboard/settings/page.tsx`: Client component (Primary focus).
     *   `app/(dashboard)/dashboard/profile/[[...rest]]/page.tsx`: Keep this for Clerk's `<UserProfile>` component routing.
@@ -881,7 +881,7 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 **Step 5.9: Implement Dashboard Page **
 
-*   [] **Task**: Enhance the main Dashboard page (`dashboard/page.tsx`) to display meaningful summary data and visualizations based on fetched metrics and recent documents.
+*   [x] **Task**: Enhance the main Dashboard page (`dashboard/page.tsx`) to display meaningful summary data and visualizations based on fetched metrics and recent documents.
 *   **Files**:
     *   `app/(dashboard)/dashboard/page.tsx`: Client component.
     *   `actions/db/metrics-actions.ts`: `fetchUserMetricsAction`.
@@ -915,23 +915,279 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 ## Section 6: Payment Integration (Stripe) - Actions & Webhooks
 
--   [ ] **Step 6.1: Implement Stripe Webhook Handler**
-    -   **Task**: Create API route for Stripe events. **Ensure it updates the `profiles` table.**
-    -   **Files**: `app/api/webhooks/stripe/route.ts`.
-    -   **Step Dependencies**: 1.3, 1.9, 3.1, 7.2
-    -   **User Instructions**: Configure webhook. Update `profiles.membership`, `profiles.stripe_*_id`.
+---
 
--   [ ] **Step 6.2: Implement Checkout Server Action**
-    -   **Task**: Create Server Action for Stripe Checkout.
-    -   **Files**: `actions/stripe/paymentActions.ts`.
-    -   **Step Dependencies**: 1.9, 1.8, 3.1, 7.2
-    -   **User Instructions**: Connect to Pricing page. Pass `user_id` in metadata.
+-   [x] **Step 6.1: Implement Stripe Webhook Handler**
+    -   **Status**: Appears Complete.
+    -   **Task**: Create and configure the API route (`/api/stripe/webhooks`) to securely receive and process Stripe webhook events. Ensure it correctly verifies webhook signatures using the secret and delegates event handling to update user profiles (`profilesTable`) and potentially usage data (`userUsageTable`) based on subscription changes.
+    -   **Files**:
+        -   `app/api/stripe/webhooks/route.ts`: API route entry point. Receives the raw request body and `stripe-signature` header.
+        -   `app/api/stripe/webhooks/route-segment.config.ts`: Correctly configured with `export const api = { bodyParser: false }` to prevent Next.js from parsing the body, allowing raw access for signature verification.
+        -   `actions/stripe/webhook-actions.ts`: Contains `processStripeWebhookAction` which orchestrates the webhook processing flow by calling `lib/stripe/webhooks.ts`.
+        -   `lib/stripe/webhooks.ts`: Contains the core `processStripeWebhook` function. This function uses `validateStripeWebhookSignature` and then handles specific Stripe event types (e.g., `checkout.session.completed`, `customer.subscription.*`, `invoice.*`).
+        -   `lib/stripe/config.ts`: Contains `getStripe` client instance and `validateStripeWebhookSignature` function for security.
+        -   `actions/db/profiles-actions.ts`: Contains `updateProfileByStripeCustomerIdAction` used by the webhook handler to update `profilesTable` fields (`membership`, `stripe_customer_id`, `stripe_subscription_id`).
+        -   `actions/db/user-usage-actions.ts`: Contains actions like `updateUserUsageAction` or `createUserUsageAction` potentially called by the webhook handler to adjust `pages_limit` in `userUsageTable` based on plan changes.
+        -   `lib/config/subscription-plans.ts`: Used by webhook handlers to map Stripe Price IDs/Product Metadata back to application `PlanId` (e.g., 'starter', 'plus', 'growth') and retrieve associated quotas/limits.
+        -   `lib/analytics/server.ts`: Used for tracking server-side events like `subscription_created`, `subscription_canceled`, etc.
+    -   **Step Dependencies**: 1.3 (User Auth), 1.9 (DB Schema - Profiles, User Usage), 3.1 (Subscription Plans Config), 7.2 (Analytics)
+    -   **User Instructions**:
+        1.  **Verification (API Route)**: In `app/api/stripe/webhooks/route.ts`, ensure the raw request body (`await request.text()`) and the `stripe-signature` header are correctly retrieved.
+        2.  **Signature Validation**: Confirm that `processStripeWebhookAction` (likely via `lib/stripe/webhooks.ts`) calls `validateStripeWebhookSignature` from `lib/stripe/config.ts`. This function should internally use `stripe.webhooks.constructEvent` with the raw body, signature, and the `STRIPE_WEBHOOK_SECRET` environment variable.
+            ```typescript
+            // Example within lib/stripe/config.ts or lib/stripe/webhooks.ts
+            import Stripe from 'stripe';
+            const stripe = getStripe(); // Your function to get the Stripe instance
 
--   [ ] **Step 6.3: Implement Customer Portal Server Action**
-    -   **Task**: Create Server Action for Stripe Billing Portal.
-    -   **Files**: `actions/stripe/paymentActions.ts`.
-    -   **Step Dependencies**: 1.9, 3.1, 6.1, 7.2
-    -   **User Instructions**: Connect to Billing page. Fetch `stripe_customer_id` from `profiles`.
+            function validateStripeWebhookSignature(
+              payload: string | Buffer,
+              signature: string,
+              webhookSecret: string
+            ): Stripe.Event {
+              try {
+                // Use the constructEvent method to verify the signature
+                const event = stripe.webhooks.constructEvent(
+                  payload,
+                  signature,
+                  webhookSecret
+                );
+                return event;
+              } catch (err: any) {
+                console.error(`⚠️ Webhook signature verification failed: ${err.message}`);
+                throw new Error('Invalid Stripe webhook signature');
+              }
+            }
+            ```
+        3.  **Action Delegation**: Verify the API route calls `processStripeWebhookAction` from `actions/stripe/webhook-actions.ts`.
+        4.  **Event Handling Logic (in `lib/stripe/webhooks.ts`)**:
+            *   Confirm that `processStripeWebhook` uses a `switch` statement or similar logic to handle relevant event types (`checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`).
+            *   For `checkout.session.completed`: Ensure it extracts `userId` and `customerId` from the session metadata and calls `updateProfileByStripeCustomerIdAction` to store the `stripe_customer_id`.
+            *   For `customer.subscription.created`/`updated`: Ensure it extracts `customerId`, `subscriptionId`, `status`, retrieves the product/price, maps it to a `PlanId` using `lib/config/subscription-plans.ts`, and updates `profilesTable` (`membership`, `stripe_subscription_id`) via `updateProfileByStripeCustomerIdAction`. Also, verify it updates `userUsageTable.pages_limit` based on the new plan's quota.
+            *   For `customer.subscription.deleted`: Ensure it updates `profilesTable` (`membership` to 'starter', clear `stripe_subscription_id`) and updates `userUsageTable.pages_limit`.
+            *   For `invoice.*` events: Ensure relevant analytics events are tracked using `trackServerEvent`.
+        5.  **Database Updates**: Double-check that `actions/db/profiles-actions.ts` (`updateProfileByStripeCustomerIdAction`) and `actions/db/user-usage-actions.ts` are correctly implemented and called with the right data from the webhook events.
+        6.  **Analytics**: Confirm `trackServerEvent` calls in `actions/stripe/webhook-actions.ts` or `lib/stripe/webhooks.ts` use consistent event names (e.g., `subscription_created`, `subscription_canceled`).
+        7.  **Stripe Dashboard Configuration**: Ensure the webhook endpoint in the Stripe Dashboard is configured to send the required events (e.g., `checkout.session.completed`, `customer.subscription.*`, `invoice.payment_succeeded`, `invoice.payment_failed`) to the correct production URL (`/api/stripe/webhooks`).
+
+---
+
+-   [x] **Step 6.2: Implement Stripe Checkout Session Creation**
+    -   **Status**: Backend appears mostly complete. Frontend connection needed.
+    -   **Task**: Implement the user flow for initiating a subscription checkout. Create a server action/API route to generate a Stripe Checkout session URL, and implement frontend logic to call this route and redirect the user to Stripe.
+    -   **Files**:
+        -   `actions/stripe/checkout-actions.ts`: Contains `createCheckoutSessionAction`. Fetches user/profile data, gets Stripe Price ID via `lib/config/subscription-plans.ts`, calls `lib/stripe/checkout.ts`.
+        -   `app/api/stripe/create-checkout-session/route.ts`: API route handling frontend requests. Authenticates user, calls `createCheckoutSessionAction`, returns session URL/ID.
+        -   `lib/stripe/checkout.ts`: Contains `createCheckoutSession` function using the Stripe SDK to create the session.
+        -   `lib/stripe/config.ts`: Provides `getStripe` instance.
+        -   `lib/config/subscription-plans.ts`: Provides `getPlanById` to get `stripePriceIdMonthly`.
+        -   `actions/db/profiles-actions.ts`: Used by `createCheckoutSessionAction` for `stripe_customer_id`.
+        -   `actions/db/users-actions.ts`: Used by `createCheckoutSessionAction` for user's email.
+        -   `app/(marketing)/page.tsx` (or dedicated Pricing component): Location of "Upgrade"/"Choose Plan" buttons.
+        -   `lib/stripe/client.ts`: Contains client-side helpers (`getStripeClient`, `redirectToCheckout`).
+    -   **Step Dependencies**: 1.3 (User Auth), 1.8 (DB Schema - Users), 1.9 (DB Schema - Profiles), 3.1 (Subscription Plans Config), 7.2 (Analytics)
+    -   **User Instructions**:
+        1.  **Backend Verification (`actions/stripe/checkout-actions.ts`, `lib/stripe/checkout.ts`, `app/api/stripe/create-checkout-session/route.ts`)**:
+            *   **Action Logic**: Ensure `createCheckoutSessionAction` correctly:
+                *   Authenticates the user (`userId`).
+                *   Retrieves the user's profile (`getProfileByUserIdAction`) to check for an existing `stripe_customer_id`.
+                *   Retrieves the user's email (`getUserByIdAction`) if a new Stripe customer might be created.
+                *   Uses `getPlanById` from `lib/config/subscription-plans.ts` to find the correct `stripePriceIdMonthly` based on the input `planId`.
+                *   Calls `createCheckoutSession` from `lib/stripe/checkout.ts`.
+            *   **Stripe API Call**: In `lib/stripe/checkout.ts`, verify `createCheckoutSession` uses the Stripe SDK correctly. **Crucially, ensure `userId` and `planId` are passed in BOTH `metadata` and `subscription_data.metadata`**.
+                ```typescript
+                // Example within lib/stripe/checkout.ts
+                import Stripe from 'stripe';
+                import { getStripe } from './config';
+                import { getPlanById } from '@/lib/config/subscription-plans'; // Adjust path as needed
+
+                // ... inside createCheckoutSession function
+                const stripe = getStripe();
+                const plan = getPlanById(planId as PlanId); // Assuming planId is validated
+
+                if (!plan || !plan.stripePriceIdMonthly) {
+                  throw new Error(`Invalid plan or missing Stripe Price ID for plan: ${planId}`);
+                }
+
+                const sessionParams: Stripe.Checkout.SessionCreateParams = {
+                  payment_method_types: ['card'],
+                  mode: 'subscription',
+                  line_items: [{
+                    price: plan.stripePriceIdMonthly,
+                    quantity: 1,
+                  }],
+                  // Pass userId for linking Stripe customer to your user
+                  customer: customerId, // Pass existing customerId if available
+                  customer_email: !customerId ? customerEmail : undefined, // Pass email only if creating a new customer
+                  // IMPORTANT: Include metadata for webhook processing
+                  metadata: {
+                    userId: userId,
+                    planId: planId,
+                  },
+                  subscription_data: {
+                    metadata: {
+                      userId: userId,
+                      planId: planId,
+                    },
+                    // trial_period_days: 14, // Optional: Add trial days if applicable
+                  },
+                  success_url: successUrl, // e.g., `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?checkout=success`
+                  cancel_url: cancelUrl,   // e.g., `${process.env.NEXT_PUBLIC_APP_URL}/pricing?checkout=canceled`
+                  allow_promotion_codes: true,
+                };
+
+                const session: Stripe.Checkout.Session = await stripe.checkout.sessions.create(sessionParams);
+                // ... return session
+                ```
+            *   **API Route**: Ensure `app/api/stripe/create-checkout-session/route.ts` authenticates, parses `planId`, calls the action, and returns `{ sessionId: session.id, url: session.url }`.
+        2.  **Frontend Implementation (`app/(marketing)/page.tsx` or Pricing Component)**:
+            *   Add `onClick` handlers to the "Upgrade" / "Choose Plan" buttons for 'plus' and 'growth' plans.
+            *   **Handler Logic**:
+                ```javascript
+                // Example onClick handler (React)
+                import { useState } from 'react';
+                import { getStripeClient } from '@/lib/stripe/client'; // Adjust path
+                import { toast } from '@/components/ui/use-toast'; // Or your toast library
+
+                const handleUpgradeClick = async (planId) => {
+                  setIsLoading(true); // Set loading state for the button
+                  try {
+                    // 1. Call your API route
+                    const response = await fetch('/api/stripe/create-checkout-session', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ planId }), // Send selected planId
+                    });
+
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      throw new Error(errorData.error || 'Failed to create checkout session.');
+                    }
+
+                    const { sessionId } = await response.json();
+
+                    // 2. Get Stripe.js instance
+                    const stripe = await getStripeClient();
+                    if (!stripe) {
+                      throw new Error('Stripe.js failed to load.');
+                    }
+
+                    // 3. Redirect to Stripe Checkout
+                    const { error } = await stripe.redirectToCheckout({ sessionId });
+
+                    if (error) {
+                      console.error('Stripe redirect error:', error);
+                      throw new Error(error.message);
+                    }
+                    // If redirect succeeds, the user won't reach here.
+
+                  } catch (error) {
+                    console.error('Upgrade error:', error);
+                    toast({
+                      title: 'Upgrade Failed',
+                      description: error.message || 'Could not initiate checkout. Please try again.',
+                      variant: 'destructive',
+                    });
+                  } finally {
+                    setIsLoading(false); // Clear loading state
+                  }
+                };
+
+                // Attach handler to button:
+                // <Button onClick={() => handleUpgradeClick('plus')} disabled={isLoading}>Upgrade to Plus</Button>
+                ```
+            *   Ensure buttons pass the correct `planId` ('plus' or 'growth').
+            *   Implement loading states for the buttons during the API call and redirect process.
+            *   Display user-friendly error messages using toasts if the API call or redirect fails.
+
+---
+
+-   [ ] **Step 6.3: Implement Stripe Customer Portal Session Creation**
+    -   **Status**: Backend appears mostly complete. Frontend connection needed.
+    -   **Task**: Allow authenticated users with existing subscriptions to manage their billing details (update payment methods, cancel subscription) via the Stripe Billing Portal. Implement a server action/API route to create a portal session link and add a button in the UI to trigger this.
+    -   **Files**:
+        -   `actions/stripe/checkout-actions.ts`: Contains `createBillingPortalSessionAction`. Fetches profile via `getProfileByUserIdAction` to get `stripe_customer_id`.
+        -   `app/api/stripe/create-billing-portal/route.ts`: API route handling frontend requests. Authenticates user, calls `createBillingPortalSessionAction`, returns portal URL.
+        -   `lib/stripe/checkout.ts`: Contains `createBillingPortalSession` function using the Stripe SDK.
+        -   `lib/stripe/config.ts`: Provides `getStripe` instance.
+        -   `actions/db/profiles-actions.ts`: Provides `getProfileByUserIdAction`.
+        -   `app/(dashboard)/dashboard/settings/page.tsx` (or dedicated Billing component): Location of the "Manage Billing" button.
+    -   **Step Dependencies**: 1.3 (User Auth), 1.9 (DB Schema - Profiles), 3.1 (Subscription Plans Config), 6.1 (Webhook must have stored `stripe_customer_id`), 7.2 (Analytics)
+    -   **User Instructions**:
+        1.  **Backend Verification (`actions/stripe/checkout-actions.ts`, `lib/stripe/checkout.ts`, `app/api/stripe/create-billing-portal/route.ts`)**:
+            *   **Action Logic**: Ensure `createBillingPortalSessionAction` correctly:
+                *   Authenticates the user (`userId`).
+                *   Fetches the user's profile using `getProfileByUserIdAction`.
+                *   Retrieves the `stripe_customer_id` from the profile. Handles the case where the ID is missing (user might be on free plan or checkout failed previously).
+                *   Calls `createBillingPortalSession` from `lib/stripe/checkout.ts`.
+            *   **Stripe API Call**: In `lib/stripe/checkout.ts`, verify `createBillingPortalSession` uses the Stripe SDK correctly, passing the `customer` ID and `return_url`.
+                ```typescript
+                // Example within lib/stripe/checkout.ts
+                import Stripe from 'stripe';
+                import { getStripe } from './config';
+
+                // ... inside createBillingPortalSession function
+                const stripe = getStripe();
+
+                if (!customerId) {
+                  throw new Error('Stripe Customer ID is required to create a billing portal session.');
+                }
+
+                const portalSession = await stripe.billingPortal.sessions.create({
+                  customer: customerId,
+                  return_url: returnUrl, // e.g., `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/settings?tab=billing`
+                });
+
+                return portalSession;
+                ```
+            *   **API Route**: Ensure `app/api/stripe/create-billing-portal/route.ts` authenticates, calls the action, handles potential errors (like no customer ID), and returns `{ url: portalSession.url }`.
+        2.  **Frontend Implementation (`app/(dashboard)/dashboard/settings/page.tsx` or Billing Component)**:
+            *   Add an `onClick` handler to the "Manage Billing" / "Manage Subscription" button. This button should likely only be visible/enabled if the user has a `stripe_customer_id` (check `profileData` state).
+            *   **Handler Logic**:
+                ```javascript
+                // Example onClick handler (React)
+                import { useState } from 'react';
+                import { toast } from '@/components/ui/use-toast'; // Or your toast library
+
+                const handleManageBillingClick = async () => {
+                  setIsLoading(true); // Set loading state for the button
+                  try {
+                    // 1. Call your API route
+                    const response = await fetch('/api/stripe/create-billing-portal', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      // Optionally send returnUrl if needed, otherwise backend default is used
+                      // body: JSON.stringify({ returnUrl: '/dashboard/settings?tab=billing' }),
+                    });
+
+                    if (!response.ok) {
+                      const errorData = await response.json();
+                      throw new Error(errorData.error || 'Failed to create billing portal session.');
+                    }
+
+                    const { url } = await response.json();
+
+                    // 2. Redirect user to the Stripe Billing Portal
+                    window.location.href = url;
+
+                  } catch (error) {
+                    console.error('Billing portal error:', error);
+                    toast({
+                      title: 'Error',
+                      description: error.message || 'Could not open billing portal. Please try again.',
+                      variant: 'destructive',
+                    });
+                    setIsLoading(false); // Clear loading state only on error
+                  }
+                  // No need to clear loading state on success, as the page will redirect.
+                };
+
+                // Attach handler to button:
+                // <Button onClick={handleManageBillingClick} disabled={isLoading || !profileData?.stripeCustomerId}>Manage Billing</Button>
+                ```
+            *   Implement loading states for the button.
+            *   Display user-friendly error messages using toasts if the API call fails (e.g., user has no Stripe customer ID).
+
+---
 
 ## Section 7: Analytics Integration (PostHog & Helicone)
 

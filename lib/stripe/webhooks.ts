@@ -41,7 +41,7 @@ export async function processStripeWebhook(
       
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
-        return await handleSubscriptionUpdated(event.data.object as Stripe.Subscription);
+        return await handleSubscriptionUpdated(event.data.object as Stripe.Subscription, event.type);
       
       case 'customer.subscription.deleted':
         return await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
@@ -84,16 +84,16 @@ async function handleCheckoutSessionCompleted(
       throw new Error('Missing userId or customerId in checkout session');
     }
     
-    // Here you would update your database with customer information
-    // For example, update the user's profile with the Stripe customer ID
-    // This would likely call a database action like updateUserProfile
+    // Extract planId from metadata if available
+    const planId = session.metadata?.planId;
     
     return {
       success: true,
       message: 'Successfully processed checkout completion',
       data: {
         userId,
-        customerId
+        customerId,
+        planId
       }
     };
   } catch (error) {
@@ -109,7 +109,8 @@ async function handleCheckoutSessionCompleted(
  * Handle subscription created/updated events
  */
 async function handleSubscriptionUpdated(
-  subscription: Stripe.Subscription
+  subscription: Stripe.Subscription,
+  eventType: string
 ): Promise<WebhookHandlerResult> {
   try {
     const customerId = subscription.customer as string;
@@ -134,18 +135,25 @@ async function handleSubscriptionUpdated(
       ? planId
       : 'starter';
     
-    // Here you would update your database with subscription information
-    // For example, update the user's profile with their plan and subscription ID
-    // This would likely call a database action like updateUserSubscription
+    // Extract metadata from subscription if available
+    const metadata = subscription.metadata || {};
+    const userId = metadata.userId || product.metadata.userId || null;
+    
+    // Extract current period info
+    const currentPeriodStart = new Date(subscription.current_period_start * 1000);
+    const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
     
     return {
       success: true,
-      message: 'Successfully processed subscription update',
+      message: `Successfully processed subscription ${eventType === 'customer.subscription.created' ? 'creation' : 'update'}`,
       data: {
         customerId,
         subscriptionId,
         planId: effectivePlanId,
-        subscriptionStatus
+        subscriptionStatus,
+        userId,
+        currentPeriodStart,
+        currentPeriodEnd
       }
     };
   } catch (error) {
@@ -165,20 +173,22 @@ async function handleSubscriptionDeleted(
 ): Promise<WebhookHandlerResult> {
   try {
     const customerId = subscription.customer as string;
+    const subscriptionId = subscription.id;
     
     if (!customerId) {
       throw new Error('Missing customerId in deleted subscription');
     }
     
-    // Here you would update your database when a subscription is canceled
-    // For example, downgrade the user to the starter plan
-    // This would likely call a database action like downgradeUserSubscription
+    // Extract userId from metadata if available
+    const userId = subscription.metadata?.userId;
     
     return {
       success: true,
       message: 'Successfully processed subscription deletion',
       data: {
         customerId,
+        subscriptionId,
+        userId,
         newPlanId: 'starter' // Always downgrade to starter plan
       }
     };
@@ -205,9 +215,11 @@ async function handleInvoicePaymentSucceeded(
       throw new Error('Missing customerId or subscriptionId in invoice');
     }
     
-    // Here you would update your database to record successful payment
-    // For example, update payment status and extend billing period
-    // This would likely call a database action like recordSuccessfulPayment
+    // Extract additional useful information
+    const amountPaid = invoice.amount_paid;
+    const currency = invoice.currency;
+    const invoiceId = invoice.id;
+    const billingReason = invoice.billing_reason;
     
     return {
       success: true,
@@ -215,7 +227,10 @@ async function handleInvoicePaymentSucceeded(
       data: {
         customerId,
         subscriptionId,
-        amount: invoice.amount_paid
+        amount: amountPaid,
+        currency,
+        invoiceId,
+        billingReason
       }
     };
   } catch (error) {
@@ -241,9 +256,12 @@ async function handleInvoicePaymentFailed(
       throw new Error('Missing customerId or subscriptionId in failed invoice');
     }
     
-    // Here you would update your database to record failed payment
-    // For example, mark subscription as past due and notify the user
-    // This would likely call a database action like recordFailedPayment
+    // Extract additional useful information
+    const invoiceId = invoice.id;
+    const attemptCount = invoice.attempt_count;
+    const nextPaymentAttempt = invoice.next_payment_attempt 
+      ? new Date(invoice.next_payment_attempt * 1000) 
+      : null;
     
     return {
       success: true,
@@ -251,14 +269,16 @@ async function handleInvoicePaymentFailed(
       data: {
         customerId,
         subscriptionId,
-        attempt: invoice.attempt_count
+        invoiceId,
+        attemptCount,
+        nextPaymentAttempt
       }
     };
   } catch (error) {
     console.error('Error handling failed invoice payment:', error);
     return {
       success: false,
-      message: error instanceof Error ? error.message : 'Unknown error in failed invoice handler'
+      message: error instanceof Error ? error.message : 'Unknown error in failed payment handler'
     };
   }
 } 

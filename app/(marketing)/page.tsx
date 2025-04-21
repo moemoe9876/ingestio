@@ -9,28 +9,29 @@ import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useToast } from "@/components/ui/use-toast"
 import { useAuth as useClerkAuth, useUser } from "@clerk/nextjs"
 import { motion } from "framer-motion"
 import {
-  ArrowDown,
-  ArrowRight,
-  ArrowUpRight,
-  BarChart,
-  CheckCircle2,
-  ChevronRight,
-  Code,
-  Database,
-  FileText,
-  Globe,
-  Layers,
-  Lock,
-  Settings,
-  Shield,
-  Sparkles,
-  Star,
-  Users,
-  Workflow,
-  Zap
+    ArrowDown,
+    ArrowRight,
+    ArrowUpRight,
+    BarChart,
+    CheckCircle2,
+    ChevronRight,
+    Code,
+    Database,
+    FileText,
+    Globe,
+    Layers,
+    Lock,
+    Settings,
+    Shield,
+    Sparkles,
+    Star,
+    Users,
+    Workflow,
+    Zap
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import Link from "next/link"
@@ -40,6 +41,7 @@ export default function LandingPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
   const [activeSection, setActiveSection] = useState("hero")
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState<string | null>(null)
   const { theme, setTheme } = useTheme()
   const heroRef = useRef<HTMLElement>(null)
   const featuresRef = useRef<HTMLElement>(null)
@@ -48,6 +50,7 @@ export default function LandingPage() {
   const pricingRef = useRef<HTMLElement>(null)
   const { user, isLoaded } = useUser()
   const { signOut } = useClerkAuth()
+  const { toast } = useToast()
   const loading = !isLoaded
 
   // Handle scroll events
@@ -94,6 +97,47 @@ export default function LandingPage() {
     window.addEventListener("mousemove", handleMouseMove)
     return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [])
+
+  // Handle plan selection and checkout
+  const handlePlanSelect = async (planId: string) => {
+    // If user is not logged in, redirect to signup
+    if (!user) {
+      window.location.href = '/signup';
+      return;
+    }
+
+    try {
+      setIsCheckoutLoading(planId);
+      
+      // Call the API to create a checkout session
+      const response = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ planId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create checkout session');
+      }
+
+      const { url } = await response.json();
+      
+      // Redirect to the checkout URL
+      window.location.href = url;
+    } catch (error) {
+      console.error('Error initiating checkout:', error);
+      toast({
+        title: 'Checkout Error',
+        description: error instanceof Error ? error.message : 'Failed to start checkout process',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCheckoutLoading(null);
+    }
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-background to-background/80 selection:bg-primary/20 selection:text-primary">
@@ -978,7 +1022,7 @@ export default function LandingPage() {
                 buttonText: "Start For Free",
                 buttonVariant: "outline" as const,
                 popular: false,
-                paymentLink: "/signup",
+                planId: "starter",
               },
               {
                 title: "Basic",
@@ -995,7 +1039,7 @@ export default function LandingPage() {
                 buttonText: "Upgrade Now",
                 buttonVariant: "outline" as const,
                 popular: false,
-                paymentLink: process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_BASIC,
+                planId: "plus",
               },
               {
                 title: "Pro",
@@ -1012,7 +1056,7 @@ export default function LandingPage() {
                 buttonText: "Go Pro",
                 buttonVariant: "default" as const,
                 popular: true,
-                paymentLink: process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK_PRO,
+                planId: "growth",
               },
             ].map((plan, index) => (
               <motion.div
@@ -1061,8 +1105,25 @@ export default function LandingPage() {
                         </motion.li>
                       ))}
                     </ul>
-                    <Button className="w-full mt-auto" variant={plan.buttonVariant} asChild>
-                      <Link href={plan.paymentLink || "#"}>{plan.buttonText}</Link>
+                    <Button 
+                      className="w-full mt-auto" 
+                      variant={plan.buttonVariant}
+                      onClick={plan.planId === "starter" 
+                        ? () => window.location.href = "/signup" 
+                        : () => handlePlanSelect(plan.planId)}
+                      disabled={isCheckoutLoading !== null}
+                    >
+                      {isCheckoutLoading === plan.planId ? (
+                        <span className="flex items-center">
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Processing...
+                        </span>
+                      ) : (
+                        plan.buttonText
+                      )}
                     </Button>
                   </CardContent>
                 </Card>
