@@ -31,3 +31,6 @@
   
 
 ## Improve Step 5.10: Implement Dashboard Page UI
+
+
+## need fix the pages input ie the system is not tracking the pages corrcetly saying 2 pages when its actually just one page.
