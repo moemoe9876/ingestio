@@ -1,0 +1,43 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+# .cursorignore
+
+# 1) Huge dependency directories
+node_modules/
+.yarn/
+
+# 2) Build outputs / caches
+.next/
+out/
+build/
+dist/
+coverage/
+
+# 3) Supabase local cache
+supabase/.temp/
+
+# 4) Maps, lockfiles (not useful for embeddings)
+**/*.map
+**/*.lock
+
+# 5) Binary assets & large media
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.gif
+**/*.ico
+**/*.svg
+**/*.mp4
+**/*.mov
+**/*.pdf
+**/*.zip
+**/*.tar.gz
+**/*.tgz
+
+# 6) One-off scripts & generated SQL
+scripts/*.js
+scripts/*.sql
+
+# 7) Planning docs / notes (if you don’t need them in your AI context)
+docs/
+todo/
+

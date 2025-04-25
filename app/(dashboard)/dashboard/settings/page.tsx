@@ -4,6 +4,7 @@ import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
 import { getCurrentUserUsageAction } from "@/actions/db/user-usage-actions";
 import { getCurrentUserDataAction, updateUserIdentityAction } from "@/actions/db/users-actions";
 import { createBillingPortalSessionAction, createCheckoutSessionAction } from "@/actions/stripe/checkout-actions";
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import { SelectProfile } from "@/db/schema/profiles-schema";
 import { SelectUserUsage } from "@/db/schema/user-usage-schema";
 import { SelectUser } from "@/db/schema/users-schema";
 import { PlanId, getPlanById, subscriptionPlans } from "@/lib/config/subscription-plans";
+import { StripeCustomerDataKV } from "@/types/stripe-kv-types";
 import { UserProfile, useUser } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { Bell, CreditCard, Database, Languages, Loader2, Lock, Palette, Save, Trash2, User as UserIcon } from "lucide-react";
@@ -77,6 +79,8 @@ export default function SettingsPage() {
   const [profileData, setProfileData] = useState<SelectProfile | null>(null);
   const [usageData, setUsageData] = useState<SelectUserUsage | null>(null);
   
+  const [kvSubscriptionData, setKvSubscriptionData] = useState<StripeCustomerDataKV | null>(null);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -101,10 +105,11 @@ export default function SettingsPage() {
       setError(null);
       
       try {
-        const [userResult, profileResult, usageResult] = await Promise.all([
+        const [userResult, profileResult, usageResult, kvSubscriptionResult] = await Promise.all([
           getCurrentUserDataAction(),
           getProfileByUserIdAction(user.id),
-          getCurrentUserUsageAction(user.id)
+          getCurrentUserUsageAction(user.id),
+          getUserSubscriptionDataKVAction(),
         ]);
         
         if (userResult.isSuccess && userResult.data) {
@@ -139,6 +144,13 @@ export default function SettingsPage() {
         } else {
           console.error("Failed to load usage data:", usageResult.message);
           setError("Failed to load usage data.");
+        }
+        
+        if (kvSubscriptionResult.isSuccess && kvSubscriptionResult.data) {
+          setKvSubscriptionData(kvSubscriptionResult.data);
+        } else {
+          console.error("Failed to load KV subscription data:", kvSubscriptionResult.message);
+          setError("Could not load subscription details.");
         }
         
       } catch (err) {
@@ -295,9 +307,16 @@ export default function SettingsPage() {
   
   const handleManageBilling = () => {
     if (!user?.id) return;
+    const customerIdFromKV = kvSubscriptionData?.customerId;
+
+    if (!customerIdFromKV) {
+      toast({ title: "Billing Error", description: "No billing information found for this account.", variant: "destructive" });
+      return;
+    }
+    
     startBillingActionTransition(async () => {
       try {
-        const result = await createBillingPortalSessionAction(user.id, "/dashboard/settings");
+        const result = await createBillingPortalSessionAction(customerIdFromKV, "/dashboard/settings");
         if (result.isSuccess && result.data?.url) {
           window.location.href = result.data.url;
         } else {
@@ -357,7 +376,9 @@ export default function SettingsPage() {
      );
    }
 
-  const currentPlanId = profileData?.membership ?? 'starter';
+  const currentPlanId = kvSubscriptionData?.status === 'active' && kvSubscriptionData.planId 
+                        ? kvSubscriptionData.planId 
+                        : 'starter';
   const currentPlan = getPlanById(currentPlanId as PlanId);
   const usagePercentage = usageData && currentPlan.documentQuota > 0 && currentPlan.documentQuota !== Infinity
     ? Math.min(100, (usageData.pagesProcessed / currentPlan.documentQuota) * 100)
@@ -730,10 +751,11 @@ export default function SettingsPage() {
                        <div className="flex items-center gap-2 mt-1">
                           <p className="text-xl font-semibold">{currentPlan.name}</p>
                           {currentPlan.planId !== 'starter' && <Badge variant="secondary">{currentPlan.planId.charAt(0).toUpperCase() + currentPlan.planId.slice(1)}</Badge>}
+                          {kvSubscriptionData?.status === 'active' && kvSubscriptionData.cancelAtPeriodEnd && <Badge variant="destructive">Cancels Soon</Badge>}
                        </div>
                        <p className="text-sm text-foreground/70 mt-1">{currentPlan.description}</p>
                      </div>
-                     {profileData.stripeCustomerId && (
+                     {kvSubscriptionData && kvSubscriptionData.status !== 'none' && kvSubscriptionData.customerId && (
                         <Button onClick={handleManageBilling} disabled={isBillingActionPending} variant="outline" size="sm" className="mt-2 sm:mt-0 flex-shrink-0">
                           {isBillingActionPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           Manage Billing
@@ -786,7 +808,10 @@ export default function SettingsPage() {
                      <Card key={plan.planId} className={`flex flex-col justify-between ${plan.planId === currentPlanId ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-foreground/20 transition-colors'}`}>
                        <CardHeader>
                          <div className="flex justify-between items-center">
-                            <CardTitle>{plan.name}</CardTitle>
+                            <CardTitle className="flex items-center gap-2">
+                              {plan.name}
+                              {plan.planId === currentPlanId && <Badge variant="outline">Current</Badge>}
+                            </CardTitle>
                             {plan.isPopular && <Badge variant="default">Popular</Badge>}
                          </div>
                          <CardDescription>{plan.description}</CardDescription>

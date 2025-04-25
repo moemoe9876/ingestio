@@ -4,8 +4,83 @@
  */
 
 import { getPlanFromStripeMetadata, type PlanId } from '@/lib/config/subscription-plans';
+import { StripeCustomerDataKV } from '@/types/stripe-kv-types';
 import { type Stripe } from 'stripe';
 import { getStripe, validateStripeWebhookSignature } from './config';
+import { syncStripeDataToKV } from './sync';
+
+// List of events that trigger a sync
+const allowedEvents: Stripe.Event.Type[] = [
+  "checkout.session.completed", // Good for initial sync trigger if success page fails
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.paused", // Handle these statuses in syncStripeDataToKV
+  "customer.subscription.resumed", // Handle these statuses in syncStripeDataToKV
+  "customer.subscription.pending_update_applied",
+  "customer.subscription.pending_update_expired",
+  "customer.subscription.trial_will_end", // Informative, sync ensures status is correct
+  "invoice.paid", // Important for renewals and usage reset
+  "invoice.payment_failed", // Important for status updates (past_due)
+  "invoice.payment_action_required", // Status update
+  "invoice.upcoming", // Informative, sync ensures status is correct
+  "invoice.marked_uncollectible", // Status update (canceled/unpaid)
+  "invoice.payment_succeeded", // Redundant with invoice.paid but good to include
+  // Payment Intent events might be less critical if focusing only on subscription state,
+  // but can be useful for tracking payment status itself. Include if needed.
+  // "payment_intent.succeeded",
+  // "payment_intent.payment_failed",
+  // "payment_intent.canceled",
+];
+
+/**
+ * Process a Stripe event by filtering based on allowedEvents
+ * and delegating to syncStripeDataToKV for allowed events
+ * 
+ * @param event Stripe webhook event
+ * @returns Synced subscription data or null if event type is not in allowedEvents
+ */
+export async function processEvent(event: Stripe.Event): Promise<StripeCustomerDataKV | null> {
+  // Skip processing if the event isn't one we track for sync
+  if (!allowedEvents.includes(event.type as Stripe.Event.Type)) {
+    console.log(`[Webhook] Skipping event type: ${event.type}`);
+    return null;
+  }
+
+  let customerId: string | null = null;
+
+  // Extract customer ID - different events have it in different places
+  const eventData = event.data.object as any; // Use 'any' for simplicity in accessing various event object structures
+
+  if (eventData.customer) {
+    customerId = typeof eventData.customer === 'string' 
+      ? eventData.customer 
+      : eventData.customer.id; // In some events, customer might be an expanded object
+  } else if (eventData.client_reference_id) {
+    // Fallback for checkout session if customer isn't immediately available
+    console.log(`[Webhook] Using client_reference_id as fallback for customerId: ${eventData.client_reference_id}`);
+    customerId = eventData.client_reference_id;
+  }
+
+  // Ensure we have a customer ID
+  if (typeof customerId !== "string" || !customerId) {
+    console.error(`[Webhook Error] Customer ID not found or not a string for event type: ${event.type}. Payload:`, eventData);
+    
+    // Throw error only for critical subscription events where customerId is always expected
+    if (event.type.startsWith('customer.subscription.') || 
+        event.type === 'invoice.paid' || 
+        event.type === 'invoice.payment_succeeded') {
+      throw new Error(`Customer ID missing for critical event type: ${event.type}`);
+    }
+    
+    return null; // For non-critical events, just return null
+  }
+
+  console.log(`[Webhook] Processing event ${event.type} for customer ${customerId}. Triggering sync...`);
+  
+  // Call the central sync function to update Redis KV store
+  return await syncStripeDataToKV(customerId);
+}
 
 // Define return type for webhook handlers
 type WebhookHandlerResult = {
@@ -34,32 +109,45 @@ export async function processStripeWebhook(
     // Validate webhook signature
     const event = validateStripeWebhookSignature(rawBody, signature, webhookSecret);
     
-    // Handle different event types
-    switch (event.type) {
-      case 'checkout.session.completed':
-        return await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session);
-      
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-        return await handleSubscriptionUpdated(event.data.object as Stripe.Subscription, event.type);
-      
-      case 'customer.subscription.deleted':
-        return await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
-      
-      case 'invoice.payment_succeeded':
-        return await handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice);
-      
-      case 'invoice.payment_failed':
-        return await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
-        
-      default:
-        // Log unhandled event but return success to avoid webhook retries
-        console.log(`Unhandled Stripe event type: ${event.type}`);
-        return {
-          success: true,
-          message: `Unhandled Stripe event: ${event.type}`
-        };
+    // Extract basic information for logging and response
+    const eventType = event.type;
+    const eventId = event.id;
+    console.log(`[Webhook] Processing Stripe event: ${eventId} (${eventType})`);
+    
+    // Process the event using our centralized handler
+    const syncedData = await processEvent(event);
+    
+    // Extract customerId from the event data for response
+    let customerId: string | null = null;
+    const eventData = event.data.object as any;
+    if (eventData.customer) {
+      customerId = typeof eventData.customer === 'string' 
+        ? eventData.customer 
+        : eventData.customer.id;
     }
+    
+    // If the event type wasn't in our allowed list, syncedData will be null
+    if (syncedData === null) {
+      console.log(`[Webhook] Event ${eventType} was not processed (not in allowed list)`);
+      return {
+        success: true, // Still return success to prevent webhook retries
+        message: `Event type ${eventType} does not require subscription sync`,
+        data: { eventType, customerId, processed: false }
+      };
+    }
+    
+    console.log(`[Webhook] Successfully synced data for customer ${customerId} from event ${eventType}`);
+    return {
+      success: true,
+      message: `Successfully processed ${eventType} event`,
+      data: {
+        eventType,
+        customerId,
+        syncedData,
+        processed: true
+      }
+    };
+    
   } catch (error) {
     console.error('Error processing Stripe webhook:', error);
     return {

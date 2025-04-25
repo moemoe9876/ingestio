@@ -2,15 +2,15 @@
 
 import { revalidatePath } from "next/cache"
 
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions"
 import { db } from "@/db/db"
 import { documentsTable, InsertDocument, SelectDocument } from "@/db/schema"
 import { trackServerEvent } from "@/lib/analytics/server"
 import { getCurrentUser } from "@/lib/auth-utils"
-import { checkRateLimit, validateTier } from "@/lib/rate-limiting/limiter"
+import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter"
 import { createAdminClient } from "@/lib/supabase/server"
 import { uploadToStorage } from "@/lib/supabase/storage-utils"
 import { ActionState } from "@/types/server-action-types"
-import { getProfileByUserIdAction } from "./profiles-actions"
 import { checkUserQuotaAction, incrementPagesProcessedAction } from "./user-usage-actions"
 
 /**
@@ -31,17 +31,23 @@ export async function uploadDocumentAction(
     const userId = await getCurrentUser()
 
     // 2. Rate limit check based on user tier
-    const profileResult = await getProfileByUserIdAction(userId)
-    if (!profileResult.isSuccess) {
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    if (!subscriptionResult.isSuccess) {
       return { 
         isSuccess: false, 
-        message: "Failed to get user profile",
+        message: "Failed to retrieve user subscription data",
         error: "404"
       }
     }
 
-    const tier = validateTier(profileResult.data.membership || "starter");
-    const rateLimitResult = await checkRateLimit(userId, tier, "document_upload")
+    // Determine tier based on subscription status and planId
+    let tier = "starter";
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
+    tier = validateTier(tier);
+    
+    const rateLimitResult = await checkRateLimit(userId, tier as SubscriptionTier, "document_upload")
     
     if (!rateLimitResult.success) {
       return { 

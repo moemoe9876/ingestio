@@ -1,7 +1,7 @@
 "use server";
 
-import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
 import { checkUserQuotaAction, incrementPagesProcessedAction } from "@/actions/db/user-usage-actions";
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
 import { getPostHogServerClient, trackServerEvent } from "@/lib/analytics/server";
 import { getCurrentUser } from "@/lib/auth-utils";
@@ -134,9 +134,9 @@ async function applyRateLimiting(userId: string, batchSize: number = 1): Promise
   tier: SubscriptionTier;
 }> {
   try {
-    // Get user's profile to determine subscription tier
-    const profileResult = await getProfileByUserIdAction(userId);
-    if (!profileResult.isSuccess) {
+    // Get user's subscription data from KV store (source of truth)
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    if (!subscriptionResult.isSuccess) {
       return {
         isAllowed: false,
         message: "Unable to determine user subscription tier",
@@ -144,8 +144,14 @@ async function applyRateLimiting(userId: string, batchSize: number = 1): Promise
       };
     }
     
+    // Determine tier based on subscription status and planId
+    let tier: SubscriptionTier = "starter";
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
+    
     // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
-    const tier = validateTier(profileResult.data.membership || "starter");
+    tier = validateTier(tier);
     
     // Check if batch size is allowed for the tier
     if (!isBatchSizeAllowed(tier, batchSize)) {
@@ -223,15 +229,21 @@ export async function extractDocumentDataAction(
     // Generate trace ID for PostHog LLM tracking
     const traceId = randomUUID();
     
-    // Get User Profile & Tier
-    const profileResult = await getProfileByUserIdAction(userId);
-    if (!profileResult.isSuccess) {
+    // Get User Subscription Data & Tier
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    if (!subscriptionResult.isSuccess) {
       return {
         isSuccess: false,
-        message: "Failed to retrieve user profile"
+        message: "Failed to retrieve user subscription data"
       };
     }
-    const tier = validateTier(profileResult.data.membership || "starter");
+    
+    // Determine tier based on subscription status and planId
+    let tier: SubscriptionTier = "starter";
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
+    tier = validateTier(tier);
     
     // Rate and quota checks
     const rateLimitResult = await checkRateLimit(userId, tier, "extraction");
@@ -607,15 +619,21 @@ export async function extractTextAction(
       };
     }
     
-    // Apply rate limiting
-    const profileResult = await getProfileByUserIdAction(userId);
-    if (!profileResult.isSuccess) {
+    // Get User Subscription Data & Tier
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    if (!subscriptionResult.isSuccess) {
       return {
         isSuccess: false,
-        message: "Failed to retrieve user profile"
+        message: "Failed to retrieve user subscription data"
       };
     }
-    const tier = validateTier(profileResult.data.membership || "starter");
+    
+    // Determine tier based on subscription status and planId
+    let tier: SubscriptionTier = "starter";
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
+    tier = validateTier(tier);
     
     // Get document file
     // @ts-ignore - Potential storage path property issue

@@ -1,15 +1,15 @@
 "use server";
 
-import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
 import { trackServerEvent } from "@/lib/analytics/server";
 import { getCurrentUser } from "@/lib/auth-utils";
 import { checkRateLimit, SubscriptionTier } from "@/lib/rate-limiting/limiter";
 import {
-    generateJsonSchemaPrompt,
-    generateTypeScriptInterfacePrompt,
-    generateZodSchemaPrompt,
-    SCHEMA_GEN_SYSTEM_PROMPT
+  generateJsonSchemaPrompt,
+  generateTypeScriptInterfacePrompt,
+  generateZodSchemaPrompt,
+  SCHEMA_GEN_SYSTEM_PROMPT
 } from "@/prompts/schemaGen";
 import { ActionState } from "@/types/server-action-types";
 import { generateObject } from "ai";
@@ -53,16 +53,20 @@ export async function generateSchemaAction(
     // Authenticate user
     const userId = await getCurrentUser();
     
-    // Get user's profile to determine subscription tier
-    const profileResult = await getProfileByUserIdAction(userId);
-    if (!profileResult.isSuccess) {
+    // Get user's subscription data to determine tier (source of truth)
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    if (!subscriptionResult.isSuccess) {
       return {
         isSuccess: false,
         message: "Unable to determine user subscription tier"
       };
     }
     
-    const tier = (profileResult.data.membership || "starter") as SubscriptionTier;
+    // Determine tier based on subscription status and planId
+    let tier: SubscriptionTier = "starter";
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
     
     // Apply rate limiting
     const { success, reset } = await checkRateLimit(

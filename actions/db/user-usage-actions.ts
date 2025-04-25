@@ -4,12 +4,12 @@
  * Server actions for managing user usage data
  */
 
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions"
 import { db } from "@/db/db"
 import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema"
-import { RATE_LIMIT_TIERS } from "@/lib/rate-limiting/limiter"
+import { RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting/limiter"
 import { ActionState } from "@/types"
 import { and, eq, gte, lte } from "drizzle-orm"
-import { getProfileByUserIdAction } from "./profiles-actions"
 
 /**
  * Create a new user usage record
@@ -36,15 +36,23 @@ export async function createUserUsageAction(
 
 /**
  * Initialize user usage record for current billing period if it doesn't exist
+ * @param userId The user ID
+ * @param options Optional parameters for custom period dates
+ * @returns ActionState with the user usage record
  */
 export async function initializeUserUsageAction(
-  userId: string
+  userId: string,
+  options?: {
+    startDate?: Date;
+    endDate?: Date;
+  }
 ): Promise<ActionState<SelectUserUsage>> {
   try {
-    // Calculate billing period dates (first to last day of current month)
+    // Calculate billing period dates
+    // Use provided dates if available, otherwise use first to last day of current month
     const now = new Date();
-    const billingPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const billingPeriodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const billingPeriodStart = options?.startDate || new Date(now.getFullYear(), now.getMonth(), 1);
+    const billingPeriodEnd = options?.endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     
     // First check if a record already exists for this billing period
     const existingUsage = await db
@@ -67,14 +75,17 @@ export async function initializeUserUsageAction(
       };
     }
     
-    // Get user profile to determine tier-based page limit
-    const profileResult = await getProfileByUserIdAction(userId);
-    const tier = profileResult.isSuccess 
-      ? (profileResult.data.membership || "starter") 
-      : "starter";
+    // Get user's subscription data from KV store (source of truth)
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    
+    // Determine tier based on subscription status and planId
+    let tier: SubscriptionTier = "starter";
+    if (subscriptionResult.isSuccess && subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
     
     // Get page limit for tier
-    const pagesLimit = RATE_LIMIT_TIERS[tier as keyof typeof RATE_LIMIT_TIERS]?.pagesPerMonth || 25;
+    const pagesLimit = RATE_LIMIT_TIERS[tier]?.pagesPerMonth || 25;
     
     // Create new usage record
     const [newUsage] = await db.insert(userUsageTable).values({
@@ -101,7 +112,7 @@ export async function initializeUserUsageAction(
     if (error instanceof Error && error.message.includes('duplicate key')) {
       try {
         const now = new Date();
-        const billingPeriodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const billingPeriodStart = options?.startDate || new Date(now.getFullYear(), now.getMonth(), 1);
         
         const [existingUsage] = await db
           .select()

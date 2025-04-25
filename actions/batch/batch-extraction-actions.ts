@@ -1,7 +1,7 @@
 "use server";
 
-import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
 import { checkUserQuotaAction } from "@/actions/db/user-usage-actions";
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { createRateLimiter, RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting";
 import { ActionState } from "@/types";
 import { auth } from "@clerk/nextjs/server";
@@ -39,16 +39,21 @@ export async function queueBatchExtractionAction(
     const { documentIds, extractionPrompt } = parsedInput.data;
     const batchSize = documentIds.length;
 
-    // Get user's profile to determine subscription tier
-    const profileResult = await getProfileByUserIdAction(userId);
-    if (!profileResult.isSuccess) {
+    // Get user's subscription data to determine tier (source of truth)
+    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    if (!subscriptionResult.isSuccess) {
       return {
         isSuccess: false,
         message: "Unable to determine user subscription tier"
       };
     }
     
-    const tier = (profileResult.data.membership || "starter") as SubscriptionTier;
+    // Determine tier based on subscription status and planId
+    let tier: SubscriptionTier = "starter";
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+      tier = subscriptionResult.data.planId as SubscriptionTier;
+    }
+    
     const maxBatchSize = RATE_LIMIT_TIERS[tier].maxBatchSize;
     
     // Check if batch size exceeds the tier limit
