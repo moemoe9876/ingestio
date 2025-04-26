@@ -22,6 +22,13 @@
       "when": 1744234039088,
       "tag": "0002_pale_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1745628690831,
+      "tag": "0003_rare_puck",
+      "breakpoints": true
     }
   ]
 }

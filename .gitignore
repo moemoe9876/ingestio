@@ -50,6 +50,8 @@ service-account.json
 
 # docs directory - Contains documentation for the project
 /docs/
+/memory-bank/
+/todo/
 
 # Cursor AI configuration directory - As requested
 /.cursor/

@@ -20,7 +20,7 @@ export const extractionJobsTable = pgTable("extraction_jobs", {
     .notNull()
     .references(() => documentsTable.id, { onDelete: "cascade" }),
   batchId: uuid("batch_id")
-    .references(() => extractionBatchesTable.id, { onDelete: "set null" }),
+    .references(() => extractionBatchesTable.id, { onDelete: "cascade" }), // Changed to cascade
   status: extractionStatusEnum("status").default("queued").notNull(),
   extractionPrompt: text("extraction_prompt"),
   extractionOptions: jsonb("extraction_options").default({}).notNull(),
@@ -33,4 +33,4 @@ export const extractionJobsTable = pgTable("extraction_jobs", {
 })
 
 export type InsertExtractionJob = typeof extractionJobsTable.$inferInsert
-export type SelectExtractionJob = typeof extractionJobsTable.$inferSelect 
+export type SelectExtractionJob = typeof extractionJobsTable.$inferSelect

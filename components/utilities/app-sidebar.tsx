@@ -67,6 +67,11 @@ const navMain = [
     url: "/dashboard/metrics",
     icon: BarChart3,
   },
+  {
+    title: "Batch Upload",
+    url: "/dashboard/batch-upload",
+    icon: FileUp,
+  },
 ];
 
 const navSecondary = [

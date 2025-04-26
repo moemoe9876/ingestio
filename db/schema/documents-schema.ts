@@ -4,16 +4,21 @@ Defines the schema for documents and related document status enum.
 </ai_context>
 */
 
-import { integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
-import { profilesTable } from "./profiles-schema"
+import { integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { extractionBatchesTable } from "./extraction-batches-schema"; // Import batch schema
+import { profilesTable } from "./profiles-schema";
 
-export const documentStatusEnum = pgEnum("document_status", ["uploaded", "processing", "completed", "failed"])
+export const documentStatusEnum = pgEnum("document_status", ["uploaded", "processing", "completed", "failed"]);
 
 export const documentsTable = pgTable("documents", {
   id: uuid("id").defaultRandom().primaryKey(),
   userId: text("user_id")
     .notNull()
     .references(() => profilesTable.userId, { onDelete: "cascade" }),
+  // Add batchId foreign key
+  batchId: uuid("batch_id").references(() => extractionBatchesTable.id, {
+    onDelete: "set null",
+  }),
   originalFilename: text("original_filename").notNull(),
   storagePath: text("storage_path").notNull(),
   mimeType: text("mime_type").notNull(),
@@ -24,8 +29,8 @@ export const documentsTable = pgTable("documents", {
   updatedAt: timestamp("updated_at")
     .defaultNow()
     .notNull()
-    .$onUpdate(() => new Date())
-})
+    .$onUpdate(() => new Date()),
+});
 
-export type InsertDocument = typeof documentsTable.$inferInsert
-export type SelectDocument = typeof documentsTable.$inferSelect 
+export type InsertDocument = typeof documentsTable.$inferInsert;
+export type SelectDocument = typeof documentsTable.$inferSelect;
