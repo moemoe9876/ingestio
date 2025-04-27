@@ -1191,7 +1191,7 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 **Section 7: LLM Observability (PostHog)**
 
--   [ ] **Step 7.1: Configure PostHog SDK for LLM Observability**
+-   [x] **Step 7.1: Configure PostHog SDK for LLM Observability**
     -   **Task**: Set up the necessary PostHog Node.js client instance specifically for use with the `@posthog/ai` wrapper in your AI actions. Ensure environment variables are correctly configured.
     -   **Files**:
         -   `lib/analytics/server.ts`: (Can be simplified or renamed, e.g., `lib/posthog/server-client.ts`). This file will *only* initialize and export the `posthog-node` client instance needed by `@posthog/ai`. **Crucially, ensure this file is NOT imported by any client components or shared barrel files used by the client.**
@@ -1249,7 +1249,7 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 ---
 
--   [ ] **Step 7.2: Implement PostHog LLM Observability using `@posthog/ai`**
+-   [x] **Step 7.2: Implement PostHog LLM Observability using `@posthog/ai`**
     -   **Status**: Not Implemented.
     -   **Task**: Wrap Vertex AI model calls within your AI actions (`actions/ai/extraction-actions.ts`) using the `@posthog/ai` `withTracing` function to automatically capture `$ai_generation` events.
     -   **Files**:
@@ -1354,39 +1354,366 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 ---
 
-## Section 8: Batch Processing Feature
+Okay, here is the **full, updated implementation plan for the Batch Processing feature (Section 8)**.
 
--   [ ] **Step 8.1: Implement Batch Upload UI**
-    -   **Task**: Create the batch upload page and component.
-    -   **Files**:
-        -   `app/(dashboard)/dashboard/batch-upload/page.tsx`: Main page, check subscription.
-        -   `app/(dashboard)/dashboard/batch-upload/_components/BatchFileUpload.tsx`: Multi-file dropzone UI.
-    -   **Step Dependencies**: 1.9, 3.1, 5.1
-    -   **User Instructions**: Link from sidebar. Check `profiles.subscription_tier`.
+This version incorporates the changes necessitated by your **Sane Stripe KV Store implementation (S0-S6)** and aligns with the **Page Count Fix plan (P1-P3)**, assuming you will implement the Page Count Fix *before* starting this section.
 
--   [ ] **Step 8.2: Implement Batch Creation Server Action**
-    -   **Task**: Create Server Action to handle batch submission.
-    -   **Files**:
-        -   `actions/batch/batchActions.ts`: `createBatchProcessAction`. Check quota, create `batch_processes`, upload files, create `documents`, update batch count, track event, redirect.
-    -   **Step Dependencies**: 3.1, 3.4, 4.1, 6.4, 7.2, 8.1
-    -   **User Instructions**: Handle errors. Use structured storage paths.
+---
 
--   [ ] **Step 8.3: Implement Batch Processing Logic (Background)**
-    -   **Task**: Set up asynchronous processing using Vercel Cron Jobs and API route.
-    -   **Files**:
-        -   `app/api/batch-processor/route.ts`: Triggered by cron. Fetches pending docs, calls `extractDocumentDataAction`, updates status.
-        -   `vercel.json`: Configure cron job schedule.
-    -   **Step Dependencies**: 3.1, 3.4, 4.3, 8.2
-    -   **User Instructions**: Secure API route. Implement locking. Handle errors/rate limits.
+**Updated Implementation Plan: Section 8 - Batch Processing (Integrated with Sane Stripe & Page Count Fix)**
 
--   [ ] **Step 8.4: Implement Batch Status UI**
-    -   **Task**: Create pages to list and view batch statuses.
-    -   **Files**:
-        -   `app/(dashboard)/dashboard/batches/page.tsx`: List batches.
-        -   `app/(dashboard)/dashboard/batches/[batchId]/page.tsx`: Batch details.
-        -   `app/(dashboard)/dashboard/batches/[batchId]/_components/BatchStatusClient.tsx`: Display progress, document list.
-    -   **Step Dependencies**: 3.1, 3.3, 8.2
-    -   **User Instructions**: Show clear progress.
+**Feature Overview:** Implement a scalable and reliable batch document processing system. Access and limits for this feature ('Plus' and 'Growth' tiers only) are determined by the user's subscription status fetched from the **Redis KV store**. Usage is metered based on the **accurate server-side page count** for each successfully processed document.
+
+**Tier Limits (from `lib/config/subscription-plans.ts`):**
+*   **Plus Tier:** Max **25** documents/batch (`BATCH_PROCESSING_LIMIT_PLUS`).
+*   **Growth Tier:** Max **100** documents/batch (`BATCH_PROCESSING_LIMIT_GROWTH`).
+*   **Starter Tier:** Batch processing **disabled**.
+
+**RLS Context:** All database operations must respect existing RLS policies (`auth.jwt()->>'sub' == user_id`). New RLS policies **must be created and tested** for the `extraction_batches` table.
+
+---
+
+
+
+
+
+### Step 8.0: Database Schema Setup & Migration
+
+*   **Status**: **[x] Completed**
+*   **Summary**: You have already defined the necessary enums (`batch_status_enum`), updated Drizzle schemas (`extraction_batches`, `documents`, `extraction_jobs`), generated the migration, and applied it to your database.
+
+
+### Step 8.1: Implement Batch Upload UI
+
+*   [ ] **Task**: Develop the frontend interface for initiating batch uploads.
+*   [ ] **Goal**: Provide a user-friendly way for eligible users (determined by **KV store data**) to select multiple files, provide instructions, and submit a batch job.
+*   **Modules**:
+    *   **8.1.1: Create Batch Upload Page Structure & Access Control**:
+        *   **Action**: Set up the main page component (`app/(dashboard)/dashboard/batch-upload/page.tsx`). Implement tier-based access control **using data fetched from the KV store**.
+        *   **Files**: `app/(dashboard)/dashboard/batch-upload/page.tsx`, `actions/stripe/sync-actions.ts` (import `getUserSubscriptionDataKVAction`).
+        *   **Instructions**:
+            1.  Use `"use client"`. Import necessary hooks (`useState`, `useEffect`), components, and the `getUserSubscriptionDataKVAction`.
+            2.  In `useEffect`, call `getUserSubscriptionDataKVAction()` to fetch the user's current subscription status (`status`, `planId`). Manage loading/error states.
+            3.  Based on the returned `planId` (e.g., 'starter', 'plus', 'growth') and `status` ('active', 'trialing', etc.):
+                *   If `planId` is 'starter' or status is not active/trialing, redirect the user (e.g., `router.push('/dashboard/settings?tab=billing')`) or display an "Access Denied / Upgrade Required" message.
+                *   If 'plus' or 'growth', store the `planId` and allowed `batchLimit` (from `subscription-plans.ts`) in state and display the page content.
+            4.  Display the tier-specific `batchLimit` to the user.
+            5.  Add basic layout, title ("Batch Upload"), description.
+    *   **8.1.2: Implement Multi-File Uploader Component**:
+        *   **Action**: Build or integrate the reusable file selection component (`components/utilities/BatchFileUpload.tsx` or similar).
+        *   **Files**: `components/utilities/BatchFileUpload.tsx` (or chosen component).
+        *   **Instructions**: Integrate `react-dropzone` or similar. Pass the `batchLimit` (determined in 8.1.1) to the component as the `maxFiles` prop. Implement client-side validation for file count, types (`allowedMimeTypes`), and size (`maxFileSize`). Display validation errors clearly. Show previews/list of selected files with a removal option. Use a callback (`onFilesChange`) to pass the validated `File[]` array back to the parent page (`batch-upload/page.tsx`).
+    *   **8.1.3: Implement Form and State Management**:
+        *   **Action**: Manage UI state for the batch upload form on the page (`app/(dashboard)/dashboard/batch-upload/page.tsx`).
+        *   **Files**: `app/(dashboard)/dashboard/batch-upload/page.tsx`.
+        *   **Instructions**: Use `useState` for `selectedFiles: File[]`, `batchName: string` (optional), `extractionPrompt: string`. Use `useTransition` for loading state (`isSubmitting`) during submission. Implement form fields (`Input` for name, `Textarea` for prompt). Disable the submit button if `selectedFiles` is empty, `extractionPrompt` is empty, or `isSubmitting` is true. Display any server-side errors returned from `createBatchUploadAction` using `toast` or an `Alert`.
+    *   **8.1.4: Add Sidebar Navigation**:
+        *   **Action**: Add a link to the batch upload page in the main dashboard navigation (`components/utilities/app-sidebar.tsx`).
+        *   **Files**: `components/utilities/app-sidebar.tsx`.
+        *   **Instructions**: Add a `SidebarMenuItem` linking to `/dashboard/batch-upload` with an appropriate icon (e.g., `Layers`). Access control will be handled on the page itself (8.1.1).
+*   **Dependencies**: 8.0 (DB Schema), Auth Helpers (`lib/auth-utils.ts`), **KV Subscription Action (`actions/stripe/sync-actions.ts`)**, Subscription Plans Config (`lib/config/subscription-plans.ts`), Base UI components, File Uploader component.
+
+---
+
+### Step 8.2: Implement Batch Creation Server Action
+
+*   [ ] **Task**: Develop the server-side logic (`createBatchUploadAction`) to securely handle batch submissions, create database records, manage file uploads, **validate tier access based on KV store data**, and **store accurate page counts**.
+*   [ ] **Goal**: Atomically create batch records and associated document entries while enforcing business rules derived from the KV store subscription status and accurately calculated page counts.
+*   **Modules**:
+    *   **8.2.1: Define Action & Basic Validation**:
+        *   **Action**: Create `createBatchUploadAction` in `actions/batch/batch-extraction-actions.ts`. Define input (`FormData`) and output (`ActionState<{ batchId: string }>`). Implement initial checks.
+        *   **Files**: `actions/batch/batch-extraction-actions.ts`, `actions/stripe/sync-actions.ts` (import `getUserSubscriptionDataKVAction`), `lib/auth-utils.ts`, `lib/config/subscription-plans.ts`.
+        *   **Instructions**:
+            1.  Use `"use server"`. Extract `files: File[]`, `name: string | null`, `prompt: string` from `FormData`.
+            2.  Get `userId` (`getCurrentUser`).
+            3.  **Fetch Subscription Data:** Call `getUserSubscriptionDataKVAction()` to get the user's `planId` and `status` from Redis. Handle fetch errors gracefully (return failure `ActionState`).
+            4.  **Validate Tier:**
+                *   If `planId` is 'starter' or status is not 'active'/'trialing', return `ActionState` failure ("Batch processing requires an active Plus or Growth plan.").
+                *   Determine the correct `tier` ('plus' or 'growth') based on the KV `planId`.
+            5.  **Validate File Count:** Get the appropriate `batchLimit` from `subscription-plans.ts` based on the `tier`. If `files.length > batchLimit`, return `ActionState` failure ("Exceeded maximum file count for your plan.").
+            6.  Validate `prompt` is not empty. Return error if it is.
+    *   **8.2.2: Implement Quota & Rate Limiting**:
+        *   **Action**: Integrate checks for API rate limits and *preliminary* user page quota.
+        *   **Files**: `actions/batch/batch-extraction-actions.ts`, `lib/rate-limiting/limiter.ts`, `actions/db/user-usage-actions.ts`.
+        *   **Instructions**:
+            1.  Call `checkRateLimit(userId, tier, 'batch_upload')` using the `tier` derived from KV data. Return `ActionState` failure ("Rate limit exceeded...") if `!success`.
+            2.  **Preliminary Quota Check (Optional but Recommended):** Call `checkUserQuotaAction(userId, files.length)`. This uses the *number of documents* as a rough initial estimate. If `!quotaResult.isSuccess || !quotaResult.data.hasQuota`, return `ActionState` failure ("Insufficient page quota remaining for this batch."). **Note:** This is *not* the final quota check; the background processor will check based on actual page counts per document. This step helps prevent users from submitting large batches if they are already very close to their limit.
+    *   **8.2.3: Implement File Processing & DB Transaction**:
+        *   **Action**: Handle file uploads, **server-side page counting**, and database record creation within a transaction.
+        *   **Files**: `actions/batch/batch-extraction-actions.ts`, `lib/supabase/storage-utils.ts`, `db/db.ts`, schema files, `lib/utils/document-utils.ts` (Import `getServerSidePageCount`).
+        *   **Instructions**:
+            *   Start `db.transaction(async (tx) => { ... })`.
+            *   Inside transaction:
+                *   Create `extraction_batches` record using `tx` with `status: 'pending_upload'`, storing the `extraction_prompt` and `user_id`. Get the `newBatchId`.
+                *   Initialize `totalBatchPages = 0`.
+                *   Loop through the `files` array:
+                    *   Read file content into a `Buffer` (`Buffer.from(await file.arrayBuffer())`).
+                    *   Define `storagePath` (`batches/{userId}/{newBatchId}/{uniqueFilename}`). Ensure unique filenames.
+                    *   Upload file buffer using `uploadToStorage(bucketName, storagePath, fileBuffer, file.type)`. Handle potential upload errors (throw to rollback transaction).
+                    *   **Determine Accurate Page Count:** Call `actualPageCount = await getServerSidePageCount(fileBuffer, file.type)` (from P1.1). Handle potential counting errors (log, maybe default to 1, or fail transaction).
+                    *   Add `actualPageCount` to `totalBatchPages`.
+                    *   Create `documents` record using `tx`, linking `batch_id: newBatchId`, storing the accurate `pageCount: actualPageCount`, setting `status: 'queued_for_processing'`, and other necessary fields (`userId`, `originalFilename`, `storagePath`, `mimeType`, `fileSize`).
+                *   Update the `extraction_batches` record (using `tx` and `where eq(id, newBatchId)`): set `status: 'queued'`, set `document_count: files.length`, set calculated `total_pages: totalBatchPages`.
+            *   Return the `newBatchId` from the transaction block.
+    *   **8.2.4: Finalize Action (Analytics, Revalidation, Return)**:
+        *   **Action**: Add post-transaction logic for analytics, cache revalidation, and response.
+        *   **Files**: `actions/batch/batch-extraction-actions.ts`, `lib/analytics/server.ts`, `next/cache`.
+        *   **Instructions**:
+            *   After the transaction successfully completes and returns the `batchId`:
+            *   Call `trackServerEvent('batch_created', userId, { batchId, documentCount: files.length, totalPages: totalBatchPages, tier })`.
+            *   Call `revalidatePath('/dashboard/batches')`.
+            *   Call `revalidatePath('/dashboard/history')`.
+            *   Return `ActionState` success object: `{ isSuccess: true, message: "Batch submitted successfully.", data: { batchId } }`.
+            *   Implement a top-level `try...catch` around the entire action. If the transaction fails or any other error occurs, log the error and return an appropriate failure `ActionState` (e.g., "Failed to create batch.").
+*   **Dependencies**: 8.0, 8.1, Auth Helpers, **KV Subscription Action**, DB Actions, Storage Util, Rate Limiter, Analytics, **Server-Side Page Counting (`lib/utils/document-utils.ts`)**.
+
+---
+
+### Step 8.3: Implement Background Processing Logic
+
+*   [ ] **Task**: Create the asynchronous system to process queued documents within batches, **checking quota accurately before processing each document**.
+*   [ ] **Goal**: Reliably process documents using AI, update statuses, and handle usage counting accurately based on processed pages.
+*   **Modules**:
+    *   **8.3.1: Configure Vercel Cron Job**:
+        *   **Action**: Define the cron schedule in `vercel.json`.
+        *   **Files**: `vercel.json`.
+        *   **Instructions**: Add a cron job entry targeting `/api/batch-processor` (e.g., `schedule: "*/5 * * * *"` for every 5 minutes). Ensure the `path` is correct. Add `CRON_SECRET` to environment variables.
+    *   **8.3.2: Create Secure API Route**:
+        *   **Action**: Implement the `/api/batch-processor/route.ts` endpoint.
+        *   **Files**: `app/api/batch-processor/route.ts`.
+        *   **Instructions**: Create a `POST` (or `GET`) handler. Check `request.headers.get('authorization')` against `Bearer ${process.env.CRON_SECRET}`. Reject unauthorized requests immediately.
+    *   **8.3.3: Implement Batch/Document Fetching & Locking**:
+        *   **Action**: Query for processable batches and documents, implementing locking to prevent concurrent processing.
+        *   **Files**: `app/api/batch-processor/route.ts`, schema files, `db/db.ts`.
+        *   **Instructions**:
+            1.  Query `extraction_batches` for records with `status = 'queued'`, limit the number fetched per run (e.g., 5-10 batches).
+            2.  Loop through fetched batches:
+                *   Attempt to update the batch status to `'processing'` using a conditional update (`WHERE id = batchId AND status = 'queued'`). If the update affects 0 rows, another instance picked it up, so skip this batch.
+                *   If update succeeds, query associated `documents` with `status = 'queued_for_processing'` and `batch_id = batchId`, limit the number of documents per batch run (e.g., 50-100). **Ensure you select `id`, `user_id`, `page_count`, and any other needed fields.**
+    *   **8.3.4: Implement Document Processing Loop**:
+        *   **Action**: Iterate through fetched documents, **check quota using accurate page count**, call AI, and handle results, **incrementing usage only on success**.
+        *   **Files**: `app/api/batch-processor/route.ts`, `actions/ai/extraction-actions.ts`, `actions/db/user-usage-actions.ts`.
+        *   **Instructions**:
+            1.  Inside the batch loop, loop through the fetched `documents`.
+            2.  **CRITICAL Quota Check:** For *each* document, call `quotaResult = await checkUserQuotaAction(document.userId, document.pageCount)`.
+            3.  If `!quotaResult.isSuccess || !quotaResult.data.hasQuota`:
+                *   Update the document status to `'failed'` in the `documents` table.
+                *   Create or update the corresponding `extraction_jobs` record with `status: 'failed'` and `errorMessage: 'Page quota exceeded'`.
+                *   Increment the `failed_count` in the `extraction_batches` table for this batch.
+                *   `continue` to the next document.
+            4.  If quota check passes:
+                *   Update document status to `'processing'`.
+                *   Call `aiResult = await extractDocumentDataAction({ documentId: document.id, extractionPrompt: batch.extraction_prompt }, true)`. **Note:** Pass `true` as the second argument (`invokedByBatchProcessor`) to prevent double-counting usage.
+                *   If `aiResult.isSuccess`:
+                    *   Update document status to `'completed'`.
+                    *   Update `extraction_jobs` status to `'completed'`.
+                    *   Increment batch `completed_count`.
+                    *   **Increment Usage:** Call `await incrementPagesProcessedAction(document.userId, document.pageCount)`. Handle potential errors during increment (log, but don't necessarily fail the whole batch).
+                *   If `aiResult.isSuccess === false`:
+                    *   Update document status to `'failed'`.
+                    *   Update `extraction_jobs` status to `'failed'` and set `errorMessage` from `aiResult.message`.
+                    *   Increment batch `failed_count`.
+    *   **8.3.5: Implement Batch Status Aggregation**:
+        *   **Action**: Update the overall batch status based on individual document outcomes after processing a chunk of documents for a batch.
+        *   **Files**: `app/api/batch-processor/route.ts`, schema files.
+        *   **Instructions**: After the document loop for a batch finishes (or after processing a certain number):
+            *   Re-query the `extraction_batches` table for the current `completed_count`, `failed_count`, and `document_count` for that `batchId`.
+            *   If `completed_count + failed_count === document_count`:
+                *   Determine final status: `'completed'` if `failed_count === 0`, `'partially_completed'` if `failed_count > 0 && completed_count > 0`, `'failed'` if `completed_count === 0`.
+                *   Update the `extraction_batches` record with the final `status` and set `completed_at = now()`.
+            *   Else (still documents pending): Leave status as `'processing'`.
+    *   **8.3.6: Refine AI Action for Background Use**:
+        *   **Action**: Modify `extractDocumentDataAction` to be suitable for background calls.
+        *   **Files**: `actions/ai/extraction-actions.ts`.
+        *   **Instructions**:
+            *   Ensure it accepts `extractionPrompt` override parameter.
+            *   Verify it correctly creates/updates `extraction_jobs` (including `batch_id` if passed) and `extracted_data`.
+            *   **CRITICAL:** Remove any calls to `incrementPagesProcessedAction` from within `extractDocumentDataAction`. Usage increment is handled by the batch processor loop (8.3.4).
+            *   Return detailed success/failure info including error messages.
+*   **Dependencies**: 8.0, 8.2, AI Action, Usage Actions (`checkUserQuotaAction`, `incrementPagesProcessedAction`), Vercel platform.
+
+---
+
+### Step 8.4: Implement Batch Status UI
+
+*   [ ] **Task**: Build the frontend pages for users to monitor their batch jobs.
+*   [ ] **Goal**: Provide clear visibility into batch progress and individual document statuses within a batch.
+*   **Modules**:
+    *   **8.4.1: Create Batch List Action & Page**:
+        *   **Action**: Define `fetchUserBatchesAction` (query `extraction_batches`, filter by `userId`, paginate, sort). Implement the list page UI (`app/(dashboard)/dashboard/batches/page.tsx`).
+        *   **Files**: `actions/batch/batch-extraction-actions.ts` (new action), `app/(dashboard)/dashboard/batches/page.tsx` (New File).
+        *   **Instructions**: Fetch data using the action. Display batches in a table/list (Name, Status Badge, Progress based on `completed+failed / total`, Dates). Add pagination/sorting controls. Link each batch item to its detail page (`/dashboard/batches/[batchId]`). Handle loading/empty states.
+    *   **8.4.2: Create Batch Detail Action & Page Structure**:
+        *   **Action**: Define `fetchBatchDetailsAction` (fetch specific `extraction_batches` record + associated `documents` records, verify ownership via `userId`). Set up the detail page structure (`app/(dashboard)/dashboard/batches/[batchId]/page.tsx`).
+        *   **Files**: `actions/batch/batch-extraction-actions.ts` (new action), `app/(dashboard)/dashboard/batches/[batchId]/page.tsx` (New File).
+        *   **Instructions**: Get `batchId` from params. Call action server-side to fetch data. Handle "not found" or access denied errors. Pass fetched data (batch info, documents list) to a client component.
+    *   **8.4.3: Implement Batch Detail Client Component**:
+        *   **Action**: Build the interactive client component for displaying batch details.
+        *   **Files**: `components/batch/BatchDetailClient.tsx` (New Component).
+        *   **Instructions**: Use `"use client"`. Receive `batch` and `documents` props. Display batch summary (Name, Status, Prompt, Progress Bar using counts). Display document list/table (Filename, Status Badge, Page Count, Error if failed). Link completed docs to their review page (`/dashboard/review/[documentId]`). Add document filtering/sorting within the batch. *Optional:* Implement polling (e.g., using `useSWR` with refresh interval) or Supabase Realtime for live status updates.
+*   **Dependencies**: 8.0, 8.2, 8.3 (for data/statuses), Base UI components.
+
+---
+
+### Step 8.5: Testing
+
+*   [ ] **Task**: Ensure the batch processing feature is robust, secure, and performs correctly through comprehensive testing, **mocking KV store responses for tier checks**.
+*   [ ] **Goal**: Validate functionality, security (RLS), performance, and edge cases, including tier limits based on KV data and accurate page-based quota checks.
+*   **Modules**:
+    *   **8.5.1: Unit Tests**:
+        *   **Action**: Write tests for helper functions and validation logic.
+        *   **Files**: `__tests__/utils/document-utils.test.ts` (Test `getServerSidePageCount`). Potentially tests within action files for validation logic.
+        *   **Instructions**: Use Vitest to test pure functions involved in page counting, input validation, etc.
+    *   **8.5.2: Integration Tests**:
+        *   **Action**: Test server actions (`createBatchUploadAction`) and API routes (`/api/batch-processor`) with mocked dependencies.
+        *   **Files**: `__tests__/actions/batch-extraction-actions.test.ts` (New File), `__tests__/api/batch-processor.test.ts` (New File).
+        *   **Instructions**:
+            *   Mock DB, storage, AI calls.
+            *   **Mock KV Store:** Mock `getUserSubscriptionDataKVAction` to return different subscription statuses/plans ('starter', 'plus', 'growth', 'inactive').
+            *   **Mock Usage Actions:** Mock `checkUserQuotaAction` and `incrementPagesProcessedAction`.
+            *   **Test `createBatchUploadAction`:** Verify validation against mocked KV tiers/limits. Verify preliminary quota check (using file count). Verify DB records created correctly (including accurate `pageCount` and `total_pages`). Verify storage calls. Verify analytics event.
+            *   **Test Background Processor (`/api/batch-processor`):** Mock fetching batches/documents. Mock `checkUserQuotaAction` to simulate success/failure during the loop. Verify documents are skipped on quota failure. Mock AI calls (`extractDocumentDataAction`). Verify `incrementPagesProcessedAction` is called *only* on AI success with the correct `pageCount`. Verify status updates (documents, jobs, batch).
+    *   **8.5.3: RLS Tests**:
+        *   **Action**: Add specific RLS tests for the **`extraction_batches`** table. Briefly review policies for `documents` and `extraction_jobs`.
+        *   **Files**: `__tests__/rls/extraction_batches.test.ts` (New File).
+        *   **Instructions**: Follow the pattern in existing RLS tests (`__tests__/rls/utils.ts`). Verify users can only SELECT, INSERT, UPDATE, DELETE their own batches. Test service role access. Briefly review `documents` and `extraction_jobs` policies to ensure new `batch_id` columns don't interfere.
+    *   **8.5.4: End-to-End (E2E) Testing**:
+        *   **Action**: Perform manual or automated E2E tests covering the user journey.
+        *   **Instructions (Manual Example)**:
+            1.  Use Stripe Test Mode to put users into 'Plus' and 'Growth' tiers (ensure KV store reflects this after sync).
+            2.  Log in as 'Plus' user. Navigate to Batch Upload.
+            3.  Attempt to upload 26 files -> Verify error message based on Plus limit (from KV).
+            4.  Upload 5 valid files (mix of 1-page and multi-page PDFs/images), add prompt, submit -> Verify success.
+            5.  Navigate to Batches list -> Verify batch appears with 'queued' or 'processing' status and correct total page count.
+            6.  Wait for processing -> Navigate to Batch Detail page.
+            7.  Verify progress bar updates. Verify individual document statuses change.
+            8.  Verify final batch status ('completed').
+            9.  Check Usage (`user_usage` table or Metrics page) to confirm `pages_processed` incremented correctly based on the *sum of actual page counts* of successfully processed documents.
+            10. Repeat tests for 'Growth' tier.
+            11. Test 'Starter' tier access denial (based on KV data).
+            12. **Quota Test:** Set user quota low (e.g., 5 pages remaining). Submit a batch with multiple documents totaling > 5 pages (e.g., three 2-page docs). Verify some documents process successfully (incrementing usage), while others fail with "Quota exceeded", and the final batch status is 'partially_completed' or 'failed' depending on successes. Verify `pages_processed` only reflects the successful pages.
+            13. Test error scenarios (invalid file type during upload, AI failure during processing).
+*   **Dependencies**: All previous steps (8.0-8.4), Testing setup (`vitest.config.ts`, `__tests__/setup.ts`), Mocking utilities for KV store.
+
+---
+
+
+
+
+
+
+
+### Step 9: Implement Reliable Server-Side Page Counting
+
+*   [x] **Task**: Modify the document upload process (`uploadDocumentAction`) to accurately determine the page count on the server *after* the file is uploaded to storage. Store this count in the `documents.page_count` field. **Remove any usage increment calls from this action.**
+*   [x] **Goal**: Ensure `documents.page_count` contains the definitive, server-verified page count for every document *before* it's considered for AI processing. Eliminate the first incorrect usage increment.
+*   **Modules**:
+    *  [x]  **P1.1: Integrate Page Counting Library**:
+        *   **Action**: Add `pdf-lib` for server-side PDF page counting.
+        *   **Files**: `package.json`, `lib/utils/document-utils.ts` (New File).
+        *   **Instructions**:
+            1.  Install `pdf-lib`: `pnpm add pdf-lib`.
+            2.  Create `lib/utils/document-utils.ts`.
+            3.  Implement `async function getServerSidePageCount(fileBuffer: Buffer, mimeType: string): Promise<number>`:
+                *   If `mimeType` is `application/pdf`, use `pdf-lib`'s `PDFDocument.load(fileBuffer)` and return `pdfDoc.getPageCount()`.
+                *   If `mimeType` starts with `image/` (e.g., `image/png`, `image/jpeg`), return `1`.
+                *   Handle errors gracefully (e.g., log error, return `1` as a fallback for unknown/corrupt files).
+    *  [x]  **P1.2: Modify Upload Action (`uploadDocumentAction`)**:
+        *   **Action**: Update `uploadDocumentAction` to:
+            1.  Remove the `pageCount` parameter from its input.
+            2.  Call `getServerSidePageCount` *after* successful file upload to storage.
+            3.  Store the returned accurate count in `documents.page_count`.
+            4.  **Remove any calls to `incrementPagesProcessedAction` or `checkUserQuotaAction` from this action.**
+        *   **Files**: `actions/db/documents.ts`, `lib/utils/document-utils.ts` (Import), `lib/supabase/storage-utils.ts` (Use).
+        *   **Instructions**:
+            *   Modify `uploadDocumentAction` signature to remove the `pageCount` parameter.
+            *   Inside the action, after `uploadToStorage` succeeds:
+                *   Call `getServerSidePageCount(fileBuffer, fileData.type)` using the file buffer and MIME type.
+                *   Store the result in the `pageCount` field when calling `db.insert(documentsTable).values(...)`.
+            *   **CRITICAL:** Ensure there are **NO** calls to `incrementPagesProcessedAction` or `checkUserQuotaAction` within `uploadDocumentAction`. Usage checking and incrementing will happen later in the AI processing step.
+    *  [x]  **P1.3: Update Calling Code (Upload UI)**:
+        *   **Action**: Modify the client-side code that calls `uploadDocumentAction` to no longer pass the estimated page count.
+        *   **Files**: `app/(dashboard)/dashboard/upload/page.tsx`.
+        *   **Instructions**: Remove any client-side page count estimation logic and remove the `pageCount` argument when calling `uploadDocumentAction`.
+*   **Dependencies**: Base DB setup, Storage Utils (`lib/supabase/storage-utils.ts`), `pdf-lib`.
+
+---
+
+### Step P2: Correct Usage Increment Logic & Quota Check
+
+*   [x] **Task**: Ensure `pages_processed` is incremented exactly once per document, using the correct `pageCount` from the database, and only after successful AI extraction. Implement quota checks *before* initiating AI processing.
+*   [x] **Goal**: Implement accurate and atomic usage tracking tied directly to successful AI processing completion, preventing unnecessary AI calls if quota is exceeded.
+*   **Modules**:
+    * [x]  **P2.1: Modify Extraction Action (`extractDocumentDataAction`)**:
+        *   **Action**: Update `extractDocumentDataAction` to:
+            1.  Fetch the document record to get the accurate `pageCount`.
+            2.  Perform a **quota check** using this `pageCount` *before* calling the AI.
+            3.  Call `incrementPagesProcessedAction` with the accurate `pageCount` *only after* successful AI processing and data saving.
+        *   **Files**: `actions/ai/extraction-actions.ts`, `actions/db/user-usage-actions.ts` (Import `checkUserQuotaAction`, `incrementPagesProcessedAction`), `db/db.ts` (For fetching document).
+        *   **Instructions**:
+            *   Inside `extractDocumentDataAction`, *early in the function* (after auth check and input validation):
+                *   Fetch the `document` record from `documentsTable` using `documentId` and `userId`. Handle "not found" errors.
+                *   Get the `actualPageCount = document.pageCount`.
+            *   **Add Quota Check:** Call `await checkUserQuotaAction(userId, actualPageCount)`.
+                *   If `!quotaResult.isSuccess || !quotaResult.data.hasQuota`, return an appropriate error `ActionState` (e.g., "Page quota exceeded") and **stop further processing**. Do *not* call the AI or increment usage.
+            *   *After* the AI call (`generateObject` or `generateText`) succeeds *and* the extracted data has been successfully saved to the `extracted_data` table:
+                *   Locate any existing `incrementPagesProcessedAction` call (it might be hardcoded to `1`).
+                *   **Modify or ensure this call uses the correct count:** `await incrementPagesProcessedAction(userId, actualPageCount)`.
+                *   Ensure this increment call happens **only once** within the success path.
+    *  [x]  **P2.2: Align with Background Processor Plan (Batch)**:
+        *   **Action**: Ensure the planned Batch Processing logic (Section 8.3.4) aligns with this single-increment approach.
+        *   **Files**: `app/api/batch-processor/route.ts` (Planned file).
+        *   **Instructions**:
+            *   **Reference:** This step primarily serves as a reminder. The actual implementation will occur during Step 8.3.4 of the Batch Processing plan.
+            *   **Verification:** When implementing the batch processor loop:
+                *   Confirm it fetches the `document.pageCount` for each document.
+                *   Confirm it calls `checkUserQuotaAction(document.userId, document.pageCount)` *before* calling `extractDocumentDataAction` for that document.
+                *   Confirm it calls `incrementPagesProcessedAction(document.userId, document.pageCount)` *only after* `extractDocumentDataAction` returns successfully for that document.
+                *   Confirm that `extractDocumentDataAction` itself **does not** call `incrementPagesProcessedAction` when invoked by the batch processor (it should only be called by the processor in this context). You might need a flag or context parameter in `extractDocumentDataAction` if it's used by both single and batch flows, or ensure the batch processor handles the increment exclusively.
+
+*   **Dependencies**: P1 (Server-Side Page Counting), AI Action (`actions/ai/extraction-actions.ts`), Usage Actions (`actions/db/user-usage-actions.ts`), Batch Processor Plan (Step 8.3).
+
+---
+
+### Step P3: Verification and Testing
+
+*   [x] **Task**: Add specific logging and tests to verify the page counting and usage increment logic is correct.
+*   [x] **Goal**: Confirm that the "1 page processed as 2" bug is fixed and usage is tracked accurately for single and multi-page documents, respecting quotas.
+*   **Modules**:
+    *  [x] **P3.1: Add Diagnostic Logging**:
+        *   **Action**: Temporarily add detailed server-side logs.
+        *   **Files**: `actions/db/documents.ts`, `actions/ai/extraction-actions.ts`, `actions/db/user-usage-actions.ts`.
+        *   **Instructions**:
+            *   In `uploadDocumentAction`: Log the result of `getServerSidePageCount`. Log that usage increment is *not* happening here.
+            *   In `extractDocumentDataAction`: Log the fetched `actualPageCount`. Log the result of the `checkUserQuotaAction`. Log the `actualPageCount` being passed to `incrementPagesProcessedAction` *after* success.
+            *   In `incrementPagesProcessedAction`: Log the `userId` and `count` being received.
+            *   *(For Batch Later)* In the batch processor: Log the `document.pageCount` before calling increment.
+    *  [x] **P3.2: Write Unit/Integration Tests**:
+        *   **Action**: Create/update tests specifically verifying the usage increment flow and quota checks.
+        *   **Files**: `__tests__/actions/user-usage.test.ts`, `__tests__/actions/extraction-actions.test.ts`.
+        *   **Instructions**:
+            *   Test `incrementPagesProcessedAction`: Mock DB update, verify correct increment value.
+            *   Test `checkUserQuotaAction`: Mock DB fetch, test scenarios with sufficient/insufficient quota.
+            *   Test `extractDocumentDataAction`:
+                *   Mock dependencies (`getCurrentUser`, DB fetch for document/pageCount, `checkUserQuotaAction`, AI call, `incrementPagesProcessedAction`).
+                *   Simulate sufficient quota: Assert `checkUserQuotaAction` is called with correct `pageCount`, AI mock is called, `incrementPagesProcessedAction` is called *once* after AI success with correct `pageCount`.
+                *   Simulate insufficient quota: Assert `checkUserQuotaAction` is called, AI mock is *not* called, `incrementPagesProcessedAction` is *not* called, and an appropriate error `ActionState` is returned.
+    *  [x] **P3.3: Perform Manual E2E Tests**:
+        *   **Action**: Manually test the **single upload flow** with documents of known page counts (1-page PDF, 1-page image, 5-page PDF). Test quota limits.
+        *   **Instructions**:
+            1.  Check initial `pages_processed` in `user_usage` table for the test user.
+            2.  Upload a 1-page PDF via the single upload UI. Wait for completion.
+            3.  Check `user_usage` table: `pages_processed` should have increased by exactly **1**. Verify `documents.page_count` is 1.
+            4.  Upload a 1-page Image. Wait for completion.
+            5.  Check `user_usage` table: `pages_processed` should have increased by exactly **1** again. Verify `documents.page_count` is 1.
+            6.  Upload a 5-page PDF. Wait for completion.
+            7.  Check `user_usage` table: `pages_processed` should have increased by exactly **5**. Verify `documents.page_count` is 5.
+            8.  **Quota Test:** Set the user's `pages_limit` low (e.g., 3 pages remaining). Upload a 5-page PDF. Verify the upload might succeed (document record created with `pageCount=5`), but the extraction fails with a "Quota exceeded" error, and `pages_processed` does **not** increase.
+            9.  *(Batch Later)* When testing batch (Step 8), verify usage increments correctly based on *successfully processed* documents within the batch.
+            10. Remove diagnostic logs after verification.
+*   **Dependencies**: P1, P2, Testing setup.
+
+
 
 ## Section 9: UI Enhancements & Polish
 
@@ -1458,13 +1785,3 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
 
 This plan provides a detailed roadmap, incorporating the new structure, addressing the current state, and integrating all specified features and rules. Remember to test incrementally.
 ```
-
-
-
-
-
-
-
-
-
-

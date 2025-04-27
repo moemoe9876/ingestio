@@ -309,6 +309,12 @@ export default function SettingsPage() {
     if (!user?.id) return;
     const customerIdFromKV = kvSubscriptionData?.customerId;
 
+    console.log('[Settings] Attempting to manage billing with:', { 
+      userId: user.id,
+      customerIdFromKV,
+      kvSubscriptionData
+    });
+
     if (!customerIdFromKV) {
       toast({ title: "Billing Error", description: "No billing information found for this account.", variant: "destructive" });
       return;
@@ -316,13 +322,19 @@ export default function SettingsPage() {
     
     startBillingActionTransition(async () => {
       try {
-        const result = await createBillingPortalSessionAction(customerIdFromKV, "/dashboard/settings");
+        console.log('[Settings] Calling createBillingPortalSessionAction with customerId:', customerIdFromKV);
+        const result = await createBillingPortalSessionAction(customerIdFromKV, "/dashboard/settings?tab=billing");
+        console.log('[Settings] Billing portal creation result:', result);
+        
         if (result.isSuccess && result.data?.url) {
+          console.log('[Settings] Redirecting to:', result.data.url);
           window.location.href = result.data.url;
         } else {
+          console.error('[Settings] Failed to create billing portal:', result.message);
           toast({ title: "Error", description: result.message, variant: "destructive" });
         }
       } catch (err) {
+        console.error('[Settings] Exception in billing portal creation:', err);
         toast({ title: "Error", description: "Failed to open billing portal.", variant: "destructive" });
       }
     });

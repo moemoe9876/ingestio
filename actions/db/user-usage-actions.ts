@@ -4,12 +4,12 @@
  * Server actions for managing user usage data
  */
 
-import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions"
-import { db } from "@/db/db"
-import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema"
-import { RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting/limiter"
-import { ActionState } from "@/types"
-import { and, eq, gte, lte } from "drizzle-orm"
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
+import { db } from "@/db/db";
+import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema";
+import { RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting/limiter";
+import { ActionState } from "@/types";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
 
 /**
  * Create a new user usage record
@@ -78,9 +78,19 @@ export async function initializeUserUsageAction(
     // Get user's subscription data from KV store (source of truth)
     const subscriptionResult = await getUserSubscriptionDataKVAction();
     
+    // *** ADDED CHECK: Fail early if KV lookup fails ***
+    if (!subscriptionResult.isSuccess) {
+      console.error(`[initializeUserUsageAction] Failed to retrieve subscription data for user ${userId}: ${subscriptionResult.message}`);
+      // Return a specific error indicating the KV failure prevented initialization
+      return {
+        isSuccess: false,
+        message: `Failed to initialize usage: ${subscriptionResult.message}`
+      };
+    }
+    
     // Determine tier based on subscription status and planId
     let tier: SubscriptionTier = "starter";
-    if (subscriptionResult.isSuccess && subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
       tier = subscriptionResult.data.planId as SubscriptionTier;
     }
     
@@ -152,6 +162,7 @@ export async function getCurrentUserUsageAction(
 ): Promise<ActionState<SelectUserUsage>> {
   try {
     const now = new Date();
+    console.log(`[getCurrentUserUsageAction] Looking for usage record for userId: ${userId}, current date: ${now.toISOString()}`);
     
     // Find usage record that contains the current date
     const [usage] = await db
@@ -163,10 +174,20 @@ export async function getCurrentUserUsageAction(
           lte(userUsageTable.billingPeriodStart, now),
           gte(userUsageTable.billingPeriodEnd, now)
         )
-      );
+      )
+      // If multiple overlapping records exist (e.g., after mid-period subscription upgrade),
+      // choose the one with the most recent billingPeriodStart to ensure we always
+      // pick the record that reflects the **current** active subscription tier.
+      .orderBy(desc(userUsageTable.billingPeriodStart))
+      .limit(1);
+    
+    console.log(`[getCurrentUserUsageAction] Found usage record:`, usage ? 
+      `ID: ${usage.id}, period: ${usage.billingPeriodStart.toISOString()} to ${usage.billingPeriodEnd.toISOString()}, processed: ${usage.pagesProcessed}, limit: ${usage.pagesLimit}` : 
+      'No record found');
     
     if (!usage) {
       // No usage record found for current period - initialize one
+      console.log(`[getCurrentUserUsageAction] No current usage record found, initializing...`);
       return initializeUserUsageAction(userId);
     }
     
@@ -189,31 +210,57 @@ export async function getCurrentUserUsageAction(
  */
 export async function updateUserUsageAction(
   userId: string,
-  data: Partial<InsertUserUsage>
+  data: Partial<InsertUserUsage>,
+  usageId?: string
 ): Promise<ActionState<SelectUserUsage>> {
   try {
     const now = new Date()
+    console.log(`[updateUserUsageAction] userId: ${userId}, usageId: ${usageId}, data:`, data);
     
-    // Find and update the usage record that contains the current date
+    // Always apply billing period check for absolute safety
+    const dateClause = and(
+      lte(userUsageTable.billingPeriodStart, now), // Billing period has started
+      gte(userUsageTable.billingPeriodEnd, now)    // ...and has not ended yet
+    );
+    
+    let whereClause;
+    
+    // If an explicit usageId is supplied, use it as the primary filter
+    // BUT ALSO verify this is the current billing period
+    if (usageId) {
+      whereClause = and(
+        eq(userUsageTable.id, usageId),
+        eq(userUsageTable.userId, userId), // Security check
+        dateClause // CRITICAL: Always verify this is the current period
+      );
+      console.log(`[updateUserUsageAction] Using ID-based filter with usageId: ${usageId} AND current period check`);
+    } else {
+      // Otherwise fall back to date-based filtering
+      whereClause = and(
+        eq(userUsageTable.userId, userId),
+        dateClause
+      );
+      console.log(`[updateUserUsageAction] Using date-based filter as no usageId provided`);
+    }
+    
+    console.log(`[updateUserUsageAction] Final whereClause:`, whereClause);
+    
+    // Find and update the usage record
     const [updated] = await db
       .update(userUsageTable)
       .set({
         ...data,
-        updatedAt: new Date()
+        updatedAt: now
       })
-      .where(
-        and(
-          eq(userUsageTable.userId, userId),
-          lte(userUsageTable.billingPeriodStart, now),
-          gte(userUsageTable.billingPeriodEnd, now)
-        )
-      )
-      .returning()
+      .where(whereClause)
+      .returning();
+    
+    console.log(`[updateUserUsageAction] Update result:`, updated);
     
     if (!updated) {
       return {
         isSuccess: false,
-        message: "No usage record found for current billing period"
+        message: "No usage record found for update"
       }
     }
     
@@ -232,45 +279,6 @@ export async function updateUserUsageAction(
 }
 
 /**
- * Increment pages processed count for a user
- */
-export async function incrementPagesProcessedAction(
-  userId: string,
-  count: number = 1
-): Promise<ActionState<SelectUserUsage>> {
-  try {
-    // Get current usage record first
-    const currentUsageResult = await getCurrentUserUsageAction(userId)
-    
-    if (!currentUsageResult.isSuccess) {
-      return currentUsageResult
-    }
-    
-    const currentUsage = currentUsageResult.data
-    const newCount = currentUsage.pagesProcessed + count
-    
-    // Make sure this doesn't exceed the limit
-    if (newCount > currentUsage.pagesLimit) {
-      return {
-        isSuccess: false,
-        message: "Page limit exceeded"
-      }
-    }
-    
-    // Update the usage record
-    return updateUserUsageAction(userId, {
-      pagesProcessed: newCount
-    })
-  } catch (error) {
-    console.error("Error incrementing pages processed:", error)
-    return {
-      isSuccess: false,
-      message: error instanceof Error ? error.message : "Unknown error incrementing pages"
-    }
-  }
-}
-
-/**
  * Check if user has remaining page quota for current billing period
  */
 export async function checkUserQuotaAction(
@@ -282,10 +290,8 @@ export async function checkUserQuotaAction(
   usage: SelectUserUsage;
 }>> {
   try {
-    // In development environment, bypass quota check
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Development mode detected: Bypassing quota check');
-      
+    // In development environment, bypass quota check unless override is set
+    if (process.env.NODE_ENV === 'development' && process.env.ENFORCE_QUOTAS !== 'true') {
       // Get current usage record for tracking purposes, but don't enforce limit
       const currentUsageResult = await getCurrentUserUsageAction(userId);
       
@@ -339,4 +345,56 @@ export async function checkUserQuotaAction(
       message: error instanceof Error ? error.message : "Unknown error checking quota"
     }
   }
-} 
+}
+
+/**
+ * Increment pages processed count for a user
+ */
+export async function incrementPagesProcessedAction(
+  userId: string,
+  count: number = 1
+): Promise<ActionState<SelectUserUsage>> {
+  try {
+    console.log(`[incrementPagesProcessedAction] Incrementing pages for userId: ${userId} by count: ${count}`);
+    
+    // Get current usage record first
+    const currentUsageResult = await getCurrentUserUsageAction(userId)
+    
+    if (!currentUsageResult.isSuccess) {
+      console.log(`[incrementPagesProcessedAction] Failed to get current usage: ${currentUsageResult.message}`);
+      return currentUsageResult
+    }
+    
+    const currentUsage = currentUsageResult.data
+    console.log(`[incrementPagesProcessedAction] Current usage record:`, 
+      `ID: ${currentUsage.id}, period: ${currentUsage.billingPeriodStart.toISOString()} to ${currentUsage.billingPeriodEnd.toISOString()}, 
+      processed: ${currentUsage.pagesProcessed}, limit: ${currentUsage.pagesLimit}`);
+    
+    const newCount = currentUsage.pagesProcessed + count
+    console.log(`[incrementPagesProcessedAction] New count will be: ${newCount}`);
+    
+    // Make sure this doesn't exceed the limit
+    if (newCount > currentUsage.pagesLimit) {
+      console.log(`[incrementPagesProcessedAction] Page limit exceeded. Limit: ${currentUsage.pagesLimit}, Attempted: ${newCount}`);
+      return {
+        isSuccess: false,
+        message: "Page limit exceeded"
+      }
+    }
+    
+    console.log(`[incrementPagesProcessedAction] Updating usage record with ID: ${currentUsage.id} to set pagesProcessed: ${newCount}`);
+    
+    // Update the usage record using its specific ID
+    return updateUserUsageAction(
+      userId, 
+      { pagesProcessed: newCount },
+      currentUsage.id // Pass the ID to ensure only this record is updated
+    )
+  } catch (error) {
+    console.error("Error incrementing pages processed:", error)
+    return {
+      isSuccess: false,
+      message: error instanceof Error ? error.message : "Unknown error incrementing pages"
+    }
+  }
+}

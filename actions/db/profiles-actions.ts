@@ -228,3 +228,35 @@ export async function migrateFreeMembershipsToStarterAction(): Promise<ActionSta
     };
   }
 }
+
+/**
+ * Get a profile by Stripe customer ID without updating it
+ */
+export async function getProfileByStripeCustomerIdAction(
+  stripeCustomerId: string
+): Promise<ActionState<SelectProfile>> {
+  try {
+    const profile = await db.query.profiles.findFirst({
+      where: eq(profilesTable.stripeCustomerId, stripeCustomerId)
+    })
+    
+    if (!profile) {
+      return {
+        isSuccess: false,
+        message: "Profile not found by Stripe customer ID"
+      }
+    }
+
+    return {
+      isSuccess: true,
+      message: "Profile retrieved by Stripe customer ID successfully",
+      data: profile
+    }
+  } catch (error) {
+    console.error("Error getting profile by stripe customer ID:", error)
+    return {
+      isSuccess: false,
+      message: "Failed to get profile by Stripe customer ID"
+    }
+  }
+}

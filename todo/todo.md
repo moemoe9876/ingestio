@@ -34,3 +34,7 @@
 
 
 ## need fix the pages input ie the system is not tracking the pages corrcetly saying 2 pages when its actually just one page.
+
+
+
+## add the rate limit tiers to the pricing cards info for each tier !!

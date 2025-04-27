@@ -8,7 +8,11 @@ vi.mock('next/navigation', () => ({
 
 // Instead of mocking crypto directly, we'll mock the functions that use it
 vi.mock('crypto', () => ({
-  randomUUID: () => 'test-uuid-123456'
+  // Provide both named and default exports to satisfy Vitest ESM expectations
+  randomUUID: () => 'test-uuid-123456',
+  default: {
+    randomUUID: () => 'test-uuid-123456'
+  }
 }));
 
 // Mock environment variables

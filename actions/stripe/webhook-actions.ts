@@ -4,12 +4,17 @@
  * Server actions for handling Stripe webhook events
  */
 
-import { updateProfileByStripeCustomerIdAction } from "@/actions/db/profiles-actions"
-import { initializeUserUsageAction, updateUserUsageAction } from "@/actions/db/user-usage-actions"
-import { getPostHogServerClient, trackServerEvent } from "@/lib/analytics/server"
+import {
+  createUserUsageAction
+} from "@/actions/db/user-usage-actions"
+import { trackServerEvent } from "@/lib/analytics/server"
 import { getPlanById } from "@/lib/config/subscription-plans"
 import { processStripeWebhook } from "@/lib/stripe/webhooks"
 import { ActionState } from "@/types"
+import {
+  getProfileByStripeCustomerIdAction,
+  updateProfileByStripeCustomerIdAction
+} from "../db/profiles-actions"
 
 // Analytics event constants for tracking
 const ANALYTICS_EVENTS = {
@@ -26,196 +31,117 @@ const ANALYTICS_EVENTS = {
  * Implements the "Sane Stripe" approach using KV store as source of truth.
  */
 export async function processStripeWebhookAction(
-  rawBody: string | Buffer,
+  rawBody: string,
   signature: string
-): Promise<ActionState<unknown>> {
+): Promise<ActionState<{ processed: boolean; eventType?: string }>> {
   try {
-    // Track that we received a webhook
-    const webhookTimestamp = new Date().toISOString()
-    
-    // Track webhook received (without userId since we don't have it yet)
-    try {
-      const client = getPostHogServerClient()
-      await client.capture({
-        distinctId: 'server', // Use 'server' since we don't have a user ID yet
-        event: ANALYTICS_EVENTS.WEBHOOK_RECEIVED,
-        properties: {
-          timestamp: webhookTimestamp
-        }
-      })
-    } catch (analyticsError) {
-      console.error('Failed to track webhook receipt:', analyticsError)
-    }
-    
-    // Process the webhook using the refactored webhook handler
+    // TODO: Add event tracking for webhook receipt attempts
+    console.log("[Webhook] Received webhook request.")
+
     const result = await processStripeWebhook(rawBody, signature)
-    
+
     if (!result.success) {
-      // Track webhook validation failure
-      try {
-        const client = getPostHogServerClient()
-        await client.capture({
-          distinctId: 'server',
-          event: ANALYTICS_EVENTS.WEBHOOK_INVALID,
-          properties: {
-            error: result.message,
-            timestamp: webhookTimestamp
-          }
-        })
-      } catch (analyticsError) {
-        console.error('Failed to track invalid webhook:', analyticsError)
-      }
-      
-      return { 
+      console.error(`[Webhook] processStripeWebhook failed: ${result.message}`)
+      return {
         isSuccess: false,
-        message: `Failed to process webhook: ${result.message}`
+        message: result.message || "Failed to process webhook"
       }
     }
 
-    // If the webhook was processed successfully and syncedData exists
     if (result.data?.processed && result.data?.syncedData) {
       const { eventType, customerId, syncedData } = result.data
+      console.log(`[Webhook] Processing event ${eventType} for customer ${customerId}.`)
 
-      // Get userId associated with this customerId for analytics and denormalization
       let userId: string | null = null
-      
-      // Find the profile in the database linked to this Stripe customer
-      const profileResult = await updateProfileByStripeCustomerIdAction(
-        customerId,
-        {} // Empty update just to retrieve the profile
-      )
-      
+
+      // Use the get function to lookup profile by customer ID
+      const profileResult = await getProfileByStripeCustomerIdAction(customerId)
+
       if (profileResult.isSuccess && profileResult.data?.userId) {
         userId = profileResult.data.userId
         
-        // Denormalize the data from KV store to the database
-        // Extract membership and subscription ID from KV data
-        const isActiveSub = syncedData.status === 'active' || syncedData.status === 'trialing'
-        const membership = isActiveSub && syncedData.planId ? syncedData.planId : 'starter'
+        const isActiveSub =
+          syncedData.status === "active" || syncedData.status === "trialing"
+        // Use the actual plan ID string for membership
+        const membership = isActiveSub && syncedData.planId ? syncedData.planId : "starter"
         const subscriptionId = isActiveSub ? syncedData.subscriptionId : null
         
-        // Update the user's profile with the latest subscription data
-        await updateProfileByStripeCustomerIdAction(
+        // Now use updateProfile for the actual update with values to set
+        const updateResult = await updateProfileByStripeCustomerIdAction(
           customerId,
           {
-            membership: membership as any, // We know it's a valid membership value
+            membership: membership as any, // Casting might be necessary if enum/type mismatch
             stripeSubscriptionId: subscriptionId
           }
         )
-        
-        // Track the sync event with user ID
-        if (syncedData.status === 'none' || syncedData.status === 'canceled') {
-          await trackServerEvent(
-            ANALYTICS_EVENTS.STRIPE_SUBSCRIPTION_CANCELLED_SYNCED,
-            userId,
-            {
-              eventType,
-              customerId,
-              previousSubscriptionId: profileResult.data.stripeSubscriptionId,
-              timestamp: webhookTimestamp
-            }
-          )
+
+        if (!updateResult.isSuccess) {
+          console.error(`[Webhook] Failed to denormalize profile update for customer ${customerId}: ${updateResult.message}`);
         } else {
-          await trackServerEvent(
-            ANALYTICS_EVENTS.STRIPE_SUBSCRIPTION_SYNCED,
-            userId,
-            {
-              eventType,
-              customerId,
-              subscriptionId: syncedData.subscriptionId,
-              status: syncedData.status,
-              planId: syncedData.planId,
-              currentPeriodStart: syncedData.currentPeriodStart 
-                ? new Date(syncedData.currentPeriodStart * 1000).toISOString() 
-                : null,
-              currentPeriodEnd: syncedData.currentPeriodEnd 
-                ? new Date(syncedData.currentPeriodEnd * 1000).toISOString() 
-                : null,
-              cancelAtPeriodEnd: syncedData.cancelAtPeriodEnd,
-              timestamp: webhookTimestamp
-            }
-          )
+          console.log(`[Webhook] Successfully denormalized profile for customer ${customerId}`);
+          // Track subscription change event only if update succeeded
+          trackServerEvent("subscription_changed", userId, {
+            // Pass properties as the third argument
+            newPlan: membership,
+            customerId: customerId,
+            subscriptionId: subscriptionId ?? "N/A"
+          })
         }
-        
-        // Handle usage reset for subscription renewal
-        if (eventType === 'invoice.payment_succeeded' || eventType === 'invoice.paid') {
-          // Parse the raw event data to check billing_reason
-          const eventData = JSON.parse(rawBody.toString())
-          const billingReason = eventData?.data?.object?.billing_reason
-          
-          if (billingReason === 'subscription_cycle' && syncedData.status === 'active' && 
-              syncedData.subscriptionId && syncedData.currentPeriodStart && syncedData.currentPeriodEnd) {
-            
-            // Get subscription period dates from Stripe
-            const periodStart = new Date(syncedData.currentPeriodStart * 1000)
-            const periodEnd = new Date(syncedData.currentPeriodEnd * 1000)
-            
-            // Get plan details for quota limits
-            const plan = syncedData.planId ? getPlanById(syncedData.planId as any) : null
-            const pagesLimit = plan?.documentQuota ?? 0
-            
-            // Create a new usage record with the precise billing period dates from Stripe
-            // This uses our enhanced initializeUserUsageAction with custom dates
-            const usageResult = await initializeUserUsageAction(userId, {
-              startDate: periodStart,
-              endDate: periodEnd
+
+        // Reset usage if applicable
+        if (eventType === "invoice.paid" && isActiveSub && userId) {
+          console.log(`[Webhook] Event is invoice.paid. Resetting usage for user ${userId}.`);
+          const billingPeriodStart = syncedData.currentPeriodStart
+            ? new Date(syncedData.currentPeriodStart * 1000)
+            : undefined
+          const billingPeriodEnd = syncedData.currentPeriodEnd
+            ? new Date(syncedData.currentPeriodEnd * 1000)
+            : undefined
+
+          if (billingPeriodStart && billingPeriodEnd) {
+            const plan = getPlanById(membership) // Get the plan object
+            const resetUsageResult = await createUserUsageAction({
+              userId: userId,
+              // Pass Date objects directly if the action expects them
+              billingPeriodStart: billingPeriodStart,
+              billingPeriodEnd: billingPeriodEnd,
+              pagesLimit: plan?.documentQuota ?? 0, // Get limit from plan config
+              pagesProcessed: 0 // Reset processed count
             })
-            
-            if (usageResult.isSuccess) {
-              // Update the pages limit and reset the count to 0
-              await updateUserUsageAction(userId, {
-                pagesLimit: pagesLimit,
-                pagesProcessed: 0 // Reset to 0 for new period
-              })
-              
-              console.log(`[Webhook] Reset usage for user ${userId} for new billing period: ${periodStart.toISOString()} to ${periodEnd.toISOString()}`)
-              
-              // Track usage reset event
-              await trackServerEvent(
-                ANALYTICS_EVENTS.USAGE_RESET,
-                userId,
-                {
-                  subscriptionId: syncedData.subscriptionId,
-                  planId: syncedData.planId,
-                  pagesLimit: pagesLimit,
-                  periodStart: periodStart.toISOString(),
-                  periodEnd: periodEnd.toISOString(),
-                  timestamp: webhookTimestamp
-                }
-              )
+            if (!resetUsageResult.isSuccess) {
+              console.error(`[Webhook] Failed to reset usage for user ${userId}: ${resetUsageResult.message}`);
             } else {
-              console.error(`[Webhook] Failed to reset usage for user ${userId}:`, usageResult.message)
+              console.log(`[Webhook] Successfully reset usage for user ${userId}.`);
             }
+          } else {
+            console.warn(`[Webhook] Missing billing period dates for usage reset.`);
           }
         }
       } else {
-        console.log(`[Webhook] No profile found for customerId ${customerId}. Skipping denormalization.`)
+        console.log(`[Webhook] No profile found for customerId ${customerId}. Skipping denormalization and usage reset.`);
       }
-      
+
       return {
         isSuccess: true,
-        message: `Successfully processed ${eventType} webhook and synced data`,
-        data: {
-          eventType,
-          customerId,
-          userId,
-          syncedData
-        }
+        message: "Webhook processed successfully",
+        data: { processed: true, eventType: eventType }
       }
+    } else if (result.data?.processed === false) {
+      console.log(`[Webhook] Webhook processed but no sync data found or not processed. EventType: ${result.data?.eventType}`);
+      return {
+        isSuccess: true,
+        message: "Webhook received but no action taken",
+        data: { processed: false, eventType: result.data?.eventType }
+      }
+    } else {
+      console.error("[Webhook] Unexpected state: processStripeWebhook succeeded but returned invalid data structure.")
+      return { isSuccess: false, message: "Internal error after processing webhook" }
     }
-    
-    // If the webhook was received but not processed, still return success
+  } catch (error: any) {
+    console.error("[Webhook] Error processing webhook action:", error);
     return {
-      isSuccess: true,
-      message: result.message || "Webhook received but not processed",
-      data: result.data
-    }
-    
-  } catch (error) {
-    console.error('Error in processStripeWebhookAction:', error)
-    return { 
       isSuccess: false,
-      message: error instanceof Error ? error.message : "Unknown error processing webhook action"
+      message: `Error processing webhook: ${error.message}`
     }
   }
 } 

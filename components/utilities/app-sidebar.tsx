@@ -8,6 +8,7 @@ import {
   FileUp,
   History,
   Home,
+  Layers, // Import Layers icon
   LogOut,
   Moon,
   MoreVertical,
@@ -66,11 +67,6 @@ const navMain = [
     title: "Performance Metrics",
     url: "/dashboard/metrics",
     icon: BarChart3,
-  },
-  {
-    title: "Batch Upload",
-    url: "/dashboard/batch-upload",
-    icon: FileUp,
   },
 ];
 
@@ -170,6 +166,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              <SidebarMenuItem key="Batch Upload">
+                <SidebarMenuButton
+                  asChild
+                  tooltip="Batch Upload"
+                  className="w-full justify-center group-data-[state=expanded]:justify-start rounded-md py-3 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+                >
+                  <Link href="/dashboard/batch-upload">
+                    <Layers className="h-5 w-5" /> {/* Use Layers icon */}
+                    <span className="group-data-[state=collapsed]:hidden">Batch Upload</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

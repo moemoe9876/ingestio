@@ -549,37 +549,37 @@ The "Sane Stripe" approach combats synchronization issues between Stripe and the
 
 ## Section S7: Testing & Validation
 
-*   [ ] **Step S7.1: Test KV Store & Sync Logic**
+*   [x] **Step S7.1: Test KV Store & Sync Logic**
     *   **Task**: Write unit/integration tests for KV key generation, `syncStripeDataToKV`, and `getUserSubscriptionDataKVAction`.
     *   **Files**: `__tests__/stripe/sync.test.ts`, `__tests__/stripe/kv-store.test.ts`.
     *   **Step Dependencies**: S0, S1, S6.1
     *   **User Instructions**: Follow instructions from previous plan's **Step S7.1**.
 
-*   [ ] **Step S7.2: Test Refactored Checkout Flow**
+*   [x] **Step S7.2: Test Refactored Checkout Flow**
     *   **Task**: Test `createCheckoutSessionAction` ensures customer creation/mapping in KV and DB before generating the session.
     *   **Files**: `__tests__/stripe/checkout.test.ts`.
     *   **Step Dependencies**: S2
     *   **User Instructions**: Follow instructions from previous plan's **Step S7.2**.
 
-*   [ ] **Step S7.3: Test Success Page & Eager Sync**
+*   [x] **Step S7.3: Test Success Page & Eager Sync**
     *   **Task**: Test the `/stripe/success` page triggers the sync action and redirects.
     *   **Files**: `__tests__/stripe/success-page.test.tsx`, `__tests__/actions/sync-actions.test.ts`.
     *   **Step Dependencies**: S3
     *   **User Instructions**: Follow instructions from previous plan's **Step S7.3**.
 
-*   [ ] **Step S7.4: Test Refactored Webhook Handling & Usage Reset**
+*   [x] **Step S7.4: Test Refactored Webhook Handling & Usage Reset**
     *   **Task**: Test the webhook action (`processStripeWebhookAction`), event processor (`processEvent`), and usage reset trigger.
     *   **Files**: `__tests__/stripe/webhooks.test.ts`.
     *   **Step Dependencies**: S4, S5
     *   **User Instructions**: Follow instructions from previous plan's **Step S7.4**, ensuring tests cover the call to `initializeUserUsageAction` for `invoice.payment_succeeded`.
 
-*   [ ] **Step S7.5: Test Application Logic with KV Data**
+*   [x] **Step S7.5: Test Application Logic with KV Data**
     *   **Task**: Verify feature gating and authorization logic correctly uses the KV subscription data.
     *   **Files**: `__tests__/actions/batchActions.test.ts`, `__tests__/ai/extraction-actions.test.ts`, etc.
     *   **Step Dependencies**: S6
     *   **User Instructions**: Follow instructions from previous plan's **Step S7.5**, mocking `getUserSubscriptionDataKVAction`.
 
-*   [ ] **Step S7.6: Comprehensive E2E Testing**
+*   [] **Step S7.6: Comprehensive E2E Testing**
     *   **Task**: Perform end-to-end tests covering the full user lifecycle using Stripe Test Mode and Stripe CLI.
     *   **Step Dependencies**: All previous steps.
     *   **User Instructions**: Follow instructions from previous plan's **Step S7.6**.
@@ -605,5 +605,191 @@ The "Sane Stripe" approach combats synchronization issues between Stripe and the
     *   **Files**: `docs/stripe-integration.md` (New or Updated File).
     *   **Step Dependencies**: All previous steps.
     *   **User Instructions**: Follow instructions from previous plan's **Step S8.3**.
+
+---
+
+
+
+
+
+This plan assumes:
+
+*   Sections S0-S6 (Sane Stripe Backend) are implemented and tested.
+*   Page Count Fix (P1-P3) is implemented and tested.
+*   Database schema changes for Batch Processing (Step 8.0) are done.
+*   You have the necessary UI structure in place as identified (`settings/page.tsx` with a billing tab, sidebar user dropdown).
+
+---
+
+**Implementation Plan: Frontend Stripe Integration (Connecting Sane Stripe Backend)**
+
+**Goal:** Fully integrate the Sane Stripe backend logic with the user interface, allowing users to view their subscription status, manage billing, and upgrade plans directly from the application, using the Redis KV store as the primary data source.
+
+---
+
+**Relevant Files:**
+
+*   `app/(dashboard)/dashboard/settings/page.tsx`: Main UI for displaying subscription info and triggering actions.
+*   `components/utilities/app-sidebar.tsx`: Contains the user dropdown menu.
+*   `app/(marketing)/page.tsx`: (Or your dedicated pricing component) Contains public-facing upgrade buttons.
+*   `actions/stripe/sync-actions.ts`: Provides `getUserSubscriptionDataKVAction`.
+*   `actions/db/user-usage-actions.ts`: Provides `getCurrentUserUsageAction`.
+*   `actions/stripe/checkout-actions.ts`: Provides `createCheckoutSessionAction`, `createBillingPortalSessionAction`.
+*   `app/api/stripe/create-checkout-session/route.ts`: API route called by frontend.
+*   `app/api/stripe/create-billing-portal/route.ts`: API route called by frontend.
+*   `lib/stripe/client.ts`: Client-side Stripe helpers (optional, can implement fetch directly).
+*   `lib/config/subscription-plans.ts`: Plan details.
+*   Relevant UI components (`Card`, `Button`, `Progress`, `Badge`, `Skeleton`, etc.).
+
+---
+
+### Step FS.1: Fetch and Display Subscription & Usage Data in Settings
+
+*   [ ] **Task**: Modify the Settings page to fetch the user's current subscription status from the Redis KV store and their current page usage from the database, then display this information accurately in the "Subscription & Billing" tab.
+*   [ ] **Goal**: Provide users with a real-time view of their plan, status, and usage based on the Sane Stripe source of truth.
+*   **Files**: `app/(dashboard)/dashboard/settings/page.tsx`, `actions/stripe/sync-actions.ts` (Import `getUserSubscriptionDataKVAction`), `actions/db/user-usage-actions.ts` (Import `getCurrentUserUsageAction`).
+*   **Instructions**:
+    1.  **State:** Add state variables in `settings/page.tsx` for `kvSubscriptionData: StripeCustomerDataKV | null`, `usageData: SelectUserUsage | null`, `isLoading: boolean`, `error: string | null`.
+    2.  **Data Fetching:**
+        *   In `useEffect` (triggered by `user.id`), use `Promise.all` to call:
+            *   `getUserSubscriptionDataKVAction()`
+            *   `getCurrentUserUsageAction(userId)`
+        *   Handle loading state (`setIsLoading`).
+        *   On success, update `kvSubscriptionData` and `usageData` states.
+        *   On failure (for either action), set an appropriate `error` state message.
+    3.  **Display Logic:**
+        *   **Current Plan Card:**
+            *   Determine `currentPlanId` based on `kvSubscriptionData.status` ('active' or 'trialing') and `kvSubscriptionData.planId`. Default to 'starter' if status is 'none' or inactive.
+            *   Fetch `currentPlan` details using `getPlanById(currentPlanId)`.
+            *   Display `currentPlan.name` and `currentPlan.description`.
+            *   Show a `Badge` indicating the plan (e.g., "Plus", "Growth").
+            *   If `kvSubscriptionData.cancelAtPeriodEnd` is true, display a prominent "Cancels at end of period" badge/message.
+        *   **Usage Display:**
+            *   If `usageData` and `currentPlan` exist:
+                *   Display `usageData.pagesProcessed` / `currentPlan.documentQuota` (handle `Infinity` for unlimited plans).
+                *   Calculate `usagePercentage = (usageData.pagesProcessed / currentPlan.documentQuota) * 100` (handle division by zero/infinity).
+                *   Render the `Progress` component with `usagePercentage`.
+                *   Calculate and display "Days Left" using `usageData.billingPeriodEnd`.
+            *   If loading, display `Skeleton` components for plan name, usage text, and progress bar.
+            *   If error, display an error message.
+
+*   **Dependencies**: S6.1 (`getUserSubscriptionDataKVAction`), `getCurrentUserUsageAction`, UI Components.
+
+---
+
+### Step FS.2: Connect "Manage Billing" Button
+
+*   [ ] **Task**: Implement the functionality for the "Manage Billing" button within the Settings page's "Subscription & Billing" tab.
+*   [ ] **Goal**: Allow users with an active Stripe subscription to securely access the Stripe Billing Portal.
+*   **Files**: `app/(dashboard)/dashboard/settings/page.tsx`, `app/api/stripe/create-billing-portal/route.ts`, `actions/stripe/checkout-actions.ts`.
+*   **Instructions**:
+    1.  **Conditional Rendering:** In `settings/page.tsx`, only render the "Manage Billing" button if `kvSubscriptionData?.customerId` exists (meaning the user has a Stripe customer record, likely from a previous or current subscription).
+    2.  **State:** Add `isBillingActionPending` state using `useTransition`.
+    3.  **Handler Function (`handleManageBilling`):**
+        *   Create an `async` function attached to the button's `onClick`.
+        *   Wrap the logic in `startBillingActionTransition`.
+        *   Check again if `kvSubscriptionData?.customerId` exists. If not, show an error toast and return.
+        *   Call your API route: `fetch('/api/stripe/create-billing-portal', { method: 'POST' })`.
+        *   Handle the response:
+            *   If `!response.ok`, parse the error, show an error `toast`, and set `isBillingActionPending(false)`.
+            *   If `response.ok`, parse the JSON to get the `{ url }`.
+            *   Redirect the user: `window.location.href = url;`. (No need to set loading state false here, as the page navigates away).
+        *   Include `try...catch` for network errors and show a `toast`.
+    4.  **Button State:** Disable the button when `isBillingActionPending` is true. Show a loading indicator (e.g., `Loader2` icon) inside the button during the transition.
+
+*   **Dependencies**: FS.1 (fetches `kvSubscriptionData`), API route, Backend Action (`createBillingPortalSessionAction`), UI Components (`Button`, `Loader2`, `toast`).
+
+---
+
+### Step FS.3: Connect "Upgrade/Switch Plan" Buttons
+
+*   [ ] **Task**: Implement the functionality for the "Upgrade" or "Switch Plan" buttons for available paid plans within the Settings page's "Subscription & Billing" tab.
+*   [ ] **Goal**: Allow users to initiate the Stripe Checkout flow to change their subscription plan.
+*   **Files**: `app/(dashboard)/dashboard/settings/page.tsx`, `app/api/stripe/create-checkout-session/route.ts`, `actions/stripe/checkout-actions.ts`, `lib/stripe/client.ts` (optional).
+*   **Instructions**:
+    1.  **Button Rendering:** In `settings/page.tsx`, when mapping through `subscriptionPlans`:
+        *   Only render buttons for 'plus' and 'growth' plans.
+        *   Do *not* render an upgrade button for the user's `currentPlanId` (derived from `kvSubscriptionData`).
+        *   The button text should be dynamic (e.g., "Upgrade to Plus", "Switch to Growth").
+    2.  **State:** Use the same `isBillingActionPending` state from FS.2 (or create a separate one like `isCheckoutPending`) using `useTransition`.
+    3.  **Handler Function (`handleUpgradeClick`):**
+        *   Create an `async` function that accepts the target `planId: PlanId` ('plus' or 'growth').
+        *   Attach this handler to the `onClick` of each upgrade/switch button, passing the correct `planId`.
+        *   Wrap the logic in `startBillingActionTransition`.
+        *   Call your API route: `fetch('/api/stripe/create-checkout-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId }) })`.
+        *   Handle the response:
+            *   If `!response.ok`, parse error, show error `toast`, set loading state false.
+            *   If `response.ok`, parse `{ sessionId }`.
+            *   **Redirect to Stripe:**
+                *   Get the Stripe.js instance: `const stripe = await getStripeClient();` (from `lib/stripe/client.ts`). Handle potential loading errors.
+                *   Call `stripe.redirectToCheckout({ sessionId })`.
+                *   Handle potential `redirectToCheckout` errors (show `toast`, set loading state false).
+        *   Include `try...catch` for network errors.
+    4.  **Button State:** Disable the buttons when `isBillingActionPending` is true. Show a loading indicator.
+
+*   **Dependencies**: FS.1, API route, Backend Action (`createCheckoutSessionAction`), Stripe.js client helper (optional), UI Components.
+
+---
+
+### Step FS.4: Connect Marketing/Pricing Page Buttons
+
+*   [ ] **Task**: Connect the "Get Started" / "Upgrade" buttons on the public marketing/pricing page to the appropriate action (Signup or Stripe Checkout).
+*   [ ] **Goal**: Ensure public CTAs correctly direct users based on their authentication status.
+*   **Files**: `app/(marketing)/page.tsx` (or your pricing component), `lib/stripe/client.ts` (optional).
+*   **Instructions**:
+    1.  **Auth Check:** Use the `useUser` hook from Clerk to check `user` and `isLoaded`.
+    2.  **Button Logic:** For each paid plan button ('Plus', 'Growth'):
+        *   Add an `onClick` handler.
+        *   **Inside the handler:**
+            *   Check if `isLoaded`. If not, show a loading state or do nothing yet.
+            *   If `isLoaded` and `!user` (user is logged out), redirect to signup: `router.push('/signup')`.
+            *   If `isLoaded` and `user` (user is logged in), execute the same logic as **Step FS.3 Handler Function (`handleUpgradeClick`)**: call the `/api/stripe/create-checkout-session` API route and redirect to Stripe Checkout. Use `useTransition` for loading state.
+    3.  **Free Plan Button:** Ensure the "Start For Free" button simply links to `/signup`.
+
+*   **Dependencies**: Clerk `useUser`, API route, Backend Action (`createCheckoutSessionAction`), Stripe.js client helper (optional), UI Components.
+
+---
+
+### Step FS.5: Update Sidebar User Menu Link
+
+*   [ ] **Task**: Update the "Billing" link within the user dropdown menu in the sidebar to point directly to the "Subscription & Billing" tab on the Settings page.
+*   [ ] **Goal**: Provide a direct navigation path for users to manage their subscription.
+*   **Files**: `components/utilities/app-sidebar.tsx`.
+*   **Instructions**:
+    1.  Locate the `DropdownMenuItem` for "Billing" within the `DropdownMenuContent` in `app-sidebar.tsx`.
+    2.  Change the `href` prop of the nested `Link` component from `/dashboard/billing` (or whatever it was) to `/dashboard/settings?tab=billing`.
+
+*   **Dependencies**: UI Component (`app-sidebar.tsx`).
+
+---
+
+### Step FS.6: End-to-End Testing (UI Focus)
+
+*   [ ] **Task**: Manually test the frontend flows related to subscription management.
+*   [ ] **Goal**: Verify that the UI correctly displays data from the KV store and that checkout/billing portal buttons function as expected.
+*   **Instructions**:
+    1.  **Starter User:** Log in as a user known to be on the 'starter' plan (or a new user).
+        *   Navigate to Settings -> Subscription & Billing.
+        *   Verify the "Current Plan" card shows "Starter".
+        *   Verify usage shows "X / 25 pages used".
+        *   Verify the "Manage Billing" button is *not* visible or is disabled.
+        *   Verify "Upgrade" buttons are visible for 'Plus' and 'Growth'.
+        *   Click "Upgrade to Plus". Verify redirection to Stripe Checkout (Test Mode). **Do not complete checkout yet.**
+    2.  **Paid User (Plus):** Log in as a user known to have an active 'Plus' subscription (use one from previous E2E tests or create one now by completing the checkout from the previous step).
+        *   Navigate to Settings -> Subscription & Billing.
+        *   Verify the "Current Plan" card shows "Plus".
+        *   Verify usage shows "X / 250 pages used".
+        *   Verify the "Manage Billing" button *is* visible and enabled.
+        *   Click "Manage Billing". Verify redirection to Stripe Billing Portal (Test Mode).
+        *   Verify the "Upgrade" button for 'Plus' is replaced with "Current Plan" (or similar disabled state).
+        *   Verify the "Switch to Growth" button is visible. Click it. Verify redirection to Stripe Checkout for the Growth plan.
+    3.  **Cancelled User:** Log in as a user whose subscription was cancelled (at period end).
+        *   Navigate to Settings -> Subscription & Billing.
+        *   Verify the "Current Plan" card shows the *original* plan name but also indicates "Cancels at end of period".
+        *   Verify the "Manage Billing" button is still visible (users can often reactivate via portal).
+        *   Verify "Upgrade/Switch" buttons are available.
+    4.  **Error Handling:** Test clicking buttons when the API routes might fail (e.g., temporarily disable network or modify the API route to return an error). Verify user-friendly `toast` messages appear.
+
+*   **Dependencies**: All previous FS steps, Completed E2E backend tests (S7.6).
 
 ---

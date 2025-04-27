@@ -139,35 +139,50 @@ export async function createCheckoutSessionAction(
 
 /**
  * Create a Stripe billing portal session for managing subscriptions
+ * Can accept either a userId or customerId directly
  */
 export async function createBillingPortalSessionAction(
-  userId: string,
+  idParam: string,
   returnUrl?: string
 ): Promise<ActionState<{ url: string }>> {
   try {
-    if (!userId) {
+    console.log(`[BillingPortal] Called with idParam: ${idParam}, returnUrl: ${returnUrl}`);
+    
+    if (!idParam) {
+      console.error('[BillingPortal] No ID parameter provided');
       return {
         isSuccess: false,
-        message: "User ID is required"
+        message: "User ID or Customer ID is required"
       }
     }
     
-    // Get user profile to get Stripe customer ID
-    const profileResult = await getProfileByUserIdAction(userId)
+    let customerId = idParam;
     
-    if (!profileResult.isSuccess) {
-      return {
-        isSuccess: false,
-        message: `Failed to get user profile: ${profileResult.message}`
+    // If this looks like a userId (has user_ prefix) and not a Stripe customer ID (has cus_ prefix),
+    // then we need to look up the customer ID
+    if (idParam.startsWith('user_') && !idParam.startsWith('cus_')) {
+      console.log(`[BillingPortal] ID param appears to be a userId, looking up corresponding customer ID...`);
+      // Get user profile to get Stripe customer ID
+      const profileResult = await getProfileByUserIdAction(idParam)
+      console.log(`[BillingPortal] Profile lookup result:`, profileResult);
+      
+      if (!profileResult.isSuccess) {
+        console.error(`[BillingPortal] Failed to get profile for user ${idParam}: ${profileResult.message}`);
+        return {
+          isSuccess: false,
+          message: `Failed to get user profile: ${profileResult.message}`
+        }
       }
-    }
-    
-    const customerId = profileResult.data?.stripeCustomerId
-    
-    if (!customerId) {
-      return {
-        isSuccess: false,
-        message: "User does not have a Stripe customer ID"
+      
+      customerId = profileResult.data?.stripeCustomerId || '';
+      console.log(`[BillingPortal] Found customer ID: ${customerId}`);
+      
+      if (!customerId) {
+        console.error(`[BillingPortal] No customer ID found for user ${idParam}`);
+        return {
+          isSuccess: false,
+          message: "User does not have a Stripe customer ID"
+        }
       }
     }
     
@@ -176,21 +191,33 @@ export async function createBillingPortalSessionAction(
       ? `${process.env.NEXT_PUBLIC_APP_URL}${returnUrl}`
       : `${process.env.NEXT_PUBLIC_APP_URL}/dashboard`
     
-    // Create billing portal session
-    const session = await createBillingPortalSession(
-      customerId,
-      portalReturnUrl
-    )
+    console.log(`[BillingPortal] Creating portal session for customer ${customerId} with return URL: ${portalReturnUrl}`);
     
-    return {
-      isSuccess: true,
-      message: "Billing portal session created successfully",
-      data: {
-        url: session.url
+    // Create billing portal session with the customerId
+    try {
+      const session = await createBillingPortalSession(
+        customerId,
+        portalReturnUrl
+      )
+      
+      console.log(`[BillingPortal] Successfully created session with URL: ${session.url}`);
+      
+      return {
+        isSuccess: true,
+        message: "Billing portal session created successfully",
+        data: {
+          url: session.url
+        }
+      }
+    } catch (stripeError) {
+      console.error(`[BillingPortal] Stripe error creating billing portal:`, stripeError);
+      return {
+        isSuccess: false,
+        message: stripeError instanceof Error ? `Stripe error: ${stripeError.message}` : "Unknown Stripe error"
       }
     }
   } catch (error) {
-    console.error("Error creating billing portal session:", error)
+    console.error("[BillingPortal] Error creating billing portal session:", error)
     return {
       isSuccess: false,
       message: error instanceof Error ? error.message : "Unknown error creating billing portal session"

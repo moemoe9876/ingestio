@@ -202,11 +202,13 @@ async function applyRateLimiting(userId: string, batchSize: number = 1): Promise
 
 /**
  * Server action to extract data from a document using Vertex AI
- * @param input Extraction parameters
+ * @param input Extraction parameters conforming to extractDocumentSchema
+ * @param invokedByBatchProcessor Optional flag to indicate if called by the batch processor (skips usage increment)
  * @returns Extracted data with action status
  */
 export async function extractDocumentDataAction(
-  input: z.infer<typeof extractDocumentSchema>
+  input: z.infer<typeof extractDocumentSchema>,
+  invokedByBatchProcessor: boolean = false // Default to false for single extractions
 ): Promise<ActionState<any>> {
   try {
     // 1. Authentication Check
@@ -244,8 +246,26 @@ export async function extractDocumentDataAction(
       tier = subscriptionResult.data.planId as SubscriptionTier;
     }
     tier = validateTier(tier);
-    
-    // Rate and quota checks
+
+    // Get document details first to check page count for quota
+    const supabase = await createServerClient();
+    const { data: document, error: docError } = await supabase
+      .from('documents')
+      .select('*') // Select all columns to get page_count
+      .eq('id', documentId)
+      .eq('user_id', userId)
+      .single();
+
+    if (docError || !document) {
+      return {
+        isSuccess: false,
+        message: `Document not found or access denied: ${docError?.message || "Unknown error"}`
+      };
+    }
+
+    const actualPageCount = document.page_count;
+
+    // Rate limit check (can happen before quota check)
     const rateLimitResult = await checkRateLimit(userId, tier, "extraction");
     if (!rateLimitResult.success) {
       await trackServerEvent("extraction_rate_limited", userId, {
@@ -253,44 +273,21 @@ export async function extractDocumentDataAction(
         tier,
         traceId
       });
-      
       return {
         isSuccess: false,
         message: "Rate limit exceeded. Please try again later."
       };
     }
-    
-    const quotaResult = await checkUserQuotaAction(userId, 1);
+
+    // Quota check using actual page count *before* AI call
+    const quotaResult = await checkUserQuotaAction(userId, actualPageCount);
     if (!quotaResult.isSuccess || !quotaResult.data.hasQuota) {
-      await trackServerEvent("extraction_quota_exceeded", userId, {
-        documentId,
-        tier,
-        traceId,
-        remaining: quotaResult.data?.remaining || 0
-      });
-      
       return {
         isSuccess: false,
         message: `Page quota exceeded. You have ${quotaResult.data?.remaining || 0} pages remaining for this billing period.`
       };
     }
-    
-    // Get document, job setup, and file retrieval logic
-    const supabase = await createServerClient();
-    const { data: document, error: docError } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('id', documentId)
-      .eq('user_id', userId)
-      .single();
-      
-    if (docError || !document) {
-      return {
-        isSuccess: false,
-        message: `Document not found: ${docError?.message || "Unknown error"}`
-      };
-    }
-    
+
     // Create extraction job
     // @ts-ignore - Potential schema type mismatch 
     const { data: extractionJob, error: jobError } = await supabase
@@ -510,20 +507,22 @@ export async function extractDocumentDataAction(
           updated_at: new Date().toISOString()
         })
         .eq('id', documentId);
-      
-      // Update usage
-      await incrementPagesProcessedAction(userId, 1);
-      
+
+      // Update usage *only after success* and use the *actual page count*,
+      // *unless* invoked by the batch processor (which handles its own increments)
+      if (!invokedByBatchProcessor) {
+        await incrementPagesProcessedAction(userId, actualPageCount);
+      }
+
       // Track success event (in addition to automatic tracing from PostHog)
       await trackServerEvent("extraction_completed", userId, {
         documentId,
         extractionJobId: extractionJob.id,
         tier,
         traceId,
-        // @ts-ignore - Page count property might not exist
-        pageCount: document.page_count || 1
+        pageCount: actualPageCount // Use the correct page count here too
       });
-      
+
       // Revalidate paths
       revalidatePath(`/dashboard/documents/${documentId}`);
       revalidatePath("/dashboard/documents");
@@ -717,7 +716,7 @@ export async function extractTextAction(
       const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
       console.error("AI text extraction error:", errorMessage);
       
-      // Track error event (in addition to PostHog automatic tracing)
+      // Track error event (in addition to automatic tracing from PostHog)
       await trackServerEvent("text_extraction_failed", userId, {
         documentId,
         error: errorMessage,
@@ -742,14 +741,15 @@ export async function extractTextAction(
 
 /**
  * Action to extract invoice data from a document
- * This is a specialized version of extractDocumentDataAction specifically for invoices
+ * This is a specialized version of extractDocumentDataAction specifically for invoices.
+ * It calls the main action, ensuring usage is incremented (invokedByBatchProcessor defaults to false).
  */
 export async function extractInvoiceDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
   // Use the generic extraction with invoice-specific settings
-  return extractDocumentDataAction({
+  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
     documentId,
     extractionPrompt: extractionPrompt || getDefaultPrompt("invoice"),
     includeConfidence: true,
@@ -759,14 +759,15 @@ export async function extractInvoiceDataAction(
 
 /**
  * Action to extract resume data from a document
- * This is a specialized version of extractDocumentDataAction specifically for resumes
+ * This is a specialized version of extractDocumentDataAction specifically for resumes.
+ * It calls the main action, ensuring usage is incremented (invokedByBatchProcessor defaults to false).
  */
 export async function extractResumeDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
   // Use the generic extraction with resume-specific settings
-  return extractDocumentDataAction({
+  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
     documentId,
     extractionPrompt: extractionPrompt || getDefaultPrompt("resume"),
     includeConfidence: true,
@@ -776,14 +777,15 @@ export async function extractResumeDataAction(
 
 /**
  * Action to extract receipt data from a document
- * This is a specialized version of extractDocumentDataAction specifically for receipts
+ * This is a specialized version of extractDocumentDataAction specifically for receipts.
+ * It calls the main action, ensuring usage is incremented (invokedByBatchProcessor defaults to false).
  */
 export async function extractReceiptDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
   // Use the generic extraction with receipt-specific settings
-  return extractDocumentDataAction({
+  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
     documentId,
     extractionPrompt: extractionPrompt || getDefaultPrompt("receipt"),
     includeConfidence: true,
@@ -793,17 +795,18 @@ export async function extractReceiptDataAction(
 
 /**
  * Action to extract form data from a document
- * This is a specialized version of extractDocumentDataAction specifically for forms
+ * This is a specialized version of extractDocumentDataAction specifically for forms.
+ * It calls the main action, ensuring usage is incremented (invokedByBatchProcessor defaults to false).
  */
 export async function extractFormDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
   // Use the generic extraction with form-specific settings
-  return extractDocumentDataAction({
+  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
     documentId,
     extractionPrompt: extractionPrompt || getDefaultPrompt("form"),
     includeConfidence: true,
     includePositions: true, // Include positions for form fields
   });
-} 
+}

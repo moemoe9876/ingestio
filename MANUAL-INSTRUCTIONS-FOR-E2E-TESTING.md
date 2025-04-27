@@ -34,61 +34,61 @@ Note the webhook signing secret provided by the CLI and update your `STRIPE_WEBH
 
 ### Scenario 1: New Subscription Flow
 
-1. **Start with a New User**:
+1. **Start with a New User**: SUCCESS
    - Create a new test user account
    - Verify profile is created with `membership: "starter"`
    - Verify no Stripe customer ID is associated
 
-2. **Initiate Checkout**:
+2. **Initiate Checkout**:SUCCESS
    - Navigate to pricing page
    - Select "Plus" plan and click "Subscribe"
    - Verify redirect to Stripe Checkout
 
-3. **Complete Checkout**:
+3. **Complete Checkout**:SUCESS
    - Use test card: `4242 4242 4242 4242` (successful payment)
    - Complete form and submit
 
-4. **Verify Success Flow**:
+4. **Verify Success Flow**:SUCCESS
    - Verify redirect to `/stripe/success` page
    - Wait for successful sync message
    - Verify redirect to dashboard
 
-5. **Verify Data Synced**:
+5. **Verify Data Synced**:SUCCESS
    - Check Redis KV store:
      ```bash
      # Using Redis CLI or similar tool
      GET stripe:user:<userId>  # Should return customer ID
      GET stripe:customer:<customerID>  # Should return subscription data
      ```
-   - Verify profile in database is updated with:
+6. - Verify profile in database is updated with:SUCCESS
      - `stripeCustomerId` is set
      - `membership` is set to "plus"
      - `stripeSubscriptionId` is set
 
-6. **Verify Feature Access**:
+7. **Verify Feature Access**: NOT IMPLEMENTED BATCH UPLOAD YET
    - Try batch upload feature (Plus-only)
    - Verify correct page quota is set in user_usage table
    - Verify rate limits are applied correctly
 
 ### Scenario 2: Subscription Cancellation
 
-1. **Cancel Subscription**:
+1. **Cancel Subscription**: SUCCESS
    - Navigate to dashboard settings
    - Access billing portal
    - Cancel subscription (select "end at period end")
    - Return to dashboard
 
-2. **Verify Webhook Processing**:
+2. **Verify Webhook Processing**: SUCCESS
    - Check Stripe CLI output for `customer.subscription.updated` event
    - Verify Redis KV store shows `cancelAtPeriodEnd: true`
    - Current membership should still be "plus" until period end
 
-3. **Simulate Period End**:
+3. **Simulate Period End**:SUCCESS
    - Use Stripe Dashboard to cancel the subscription immediately
    - This will trigger `customer.subscription.canceled` event
    - Verify Stripe CLI captures the event
 
-4. **Verify Downgrade**:
+4. **Verify Downgrade**:SUCCESS
    - Check Redis KV shows `status: "canceled"` or `status: "none"`
    - Verify profile in database shows `membership: "starter"`
    - Verify premium features are no longer accessible

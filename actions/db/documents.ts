@@ -1,17 +1,18 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath } from "next/cache";
 
-import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions"
-import { db } from "@/db/db"
-import { documentsTable, InsertDocument, SelectDocument } from "@/db/schema"
-import { trackServerEvent } from "@/lib/analytics/server"
-import { getCurrentUser } from "@/lib/auth-utils"
-import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter"
-import { createAdminClient } from "@/lib/supabase/server"
-import { uploadToStorage } from "@/lib/supabase/storage-utils"
-import { ActionState } from "@/types/server-action-types"
-import { checkUserQuotaAction, incrementPagesProcessedAction } from "./user-usage-actions"
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
+import { db } from "@/db/db";
+import { documentsTable, InsertDocument, SelectDocument } from "@/db/schema";
+import { trackServerEvent } from "@/lib/analytics/server";
+import { getCurrentUser } from "@/lib/auth-utils";
+import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
+import { createAdminClient } from "@/lib/supabase/server";
+import { uploadToStorage } from "@/lib/supabase/storage-utils";
+import { getServerSidePageCount } from "@/lib/utils/document-utils"; // Import the new helper
+import { ActionState } from "@/types/server-action-types";
+import { checkUserQuotaAction } from "./user-usage-actions";
 
 /**
  * Uploads a document to Supabase storage and creates a record in the documents table
@@ -23,8 +24,8 @@ export async function uploadDocumentAction(
     type: string;
     size: number;
     fileBase64: string; // Base64 encoded file content
-  },
-  pageCount: number = 1
+  }
+  // pageCount parameter removed
 ): Promise<ActionState<SelectDocument>> {
   try {
     // 1. Authentication check
@@ -57,24 +58,14 @@ export async function uploadDocumentAction(
       }
     }
 
-    // 3. Quota check
-    const quotaResult = await checkUserQuotaAction(userId, pageCount)
-    if (!quotaResult.isSuccess || !quotaResult.data?.hasQuota) {
-      return { 
-        isSuccess: false, 
-        message: "Page quota exceeded", 
-        error: "403" 
-      }
-    }
-
-    // 4. File upload to Supabase storage
+    // 3. File upload to Supabase storage (Quota check moved after page count determination)
     const fileExtension = fileData.name.split('.').pop() || ''
     const fileName = `${Date.now()}_${fileData.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const storagePath = `${userId}/${fileName}`
-    
-    // Convert base64 to Buffer for upload
+
+    // Convert base64 to Buffer for upload and page counting
     const fileBuffer = Buffer.from(fileData.fileBase64.split(',')[1], 'base64')
-    
+
     // Use our storage utility with service role access to bypass RLS
     const uploadResult = await uploadToStorage(
       'documents',
@@ -85,22 +76,39 @@ export async function uploadDocumentAction(
 
     if (!uploadResult.success) {
       console.error("File upload error:", uploadResult.error)
-      return { 
-        isSuccess: false, 
-        message: "Failed to upload file", 
-        error: uploadResult.error 
+      return {
+        isSuccess: false,
+        message: "Failed to upload file",
+        error: uploadResult.error
       }
     }
 
-    // 5. Insert document record
+    // 4. Determine server-side page count
+    const actualPageCount = await getServerSidePageCount(fileBuffer, fileData.type);
+
+    // 5. Quota check (Now using actualPageCount)
+    const quotaResult = await checkUserQuotaAction(userId, actualPageCount)
+    if (!quotaResult.isSuccess || !quotaResult.data?.hasQuota) {
+      // Consider deleting the uploaded file if quota check fails after upload
+      // For simplicity now, we just return the error.
+      // await deleteFileFromStorage('documents', storagePath); // Example cleanup
+      return {
+        isSuccess: false,
+        message: "Page quota exceeded", 
+        error: "403" 
+      }
+    }
+
+    // 6. Insert document record (Using actualPageCount)
     const documentData: InsertDocument = {
       userId,
       originalFilename: fileData.name,
       storagePath,
       mimeType: fileData.type,
       fileSize: fileData.size,
-      pageCount,
-      status: "uploaded"
+      pageCount: actualPageCount, // Use server-determined page count
+      status: "uploaded",
+      batchId: null, // Single uploads are not part of a batch initially
     }
 
     const [newDocument] = await db
@@ -108,19 +116,19 @@ export async function uploadDocumentAction(
       .values(documentData)
       .returning()
 
-    // 6. Update usage metrics
-    await incrementPagesProcessedAction(userId, pageCount)
+    // 7. Update usage metrics - REMOVED from here
+    // await incrementPagesProcessedAction(userId, actualPageCount) // REMOVED
 
-    // 7. Track analytics
+    // 8. Track analytics (Using actualPageCount)
     await trackServerEvent("document_uploaded", userId, {
       document_id: newDocument.id,
       file_type: fileData.type,
-      page_count: pageCount,
+      page_count: actualPageCount, // Use server-determined page count
       file_size: fileData.size,
       membership_tier: tier
     })
 
-    // 8. Revalidate paths
+    // 9. Revalidate paths
     revalidatePath("/dashboard/documents")
     revalidatePath("/dashboard/metrics")
     revalidatePath("/dashboard/history")
@@ -284,7 +292,8 @@ export async function fetchDocumentForReviewAction(
       pageCount: documentData.page_count,
       status: documentData.status,
       createdAt: new Date(documentData.created_at),
-      updatedAt: new Date(documentData.updated_at)
+      updatedAt: new Date(documentData.updated_at),
+      batchId: (documentData as any).batch_id ?? null // Cast to any to bypass type check
     }
 
     // 3. Generate signed URL for the document
@@ -454,7 +463,7 @@ export async function fetchUserDocumentsAction({
     const supabase = await createAdminClient()
     let query = supabase
       .from("documents")
-      .select("*", { count: "exact" }) // Select all columns and get count
+      .select("*", { count: "exact" }) // Select all columns and get count (includes batch_id if exists)
       .eq("user_id", userId)
 
     // 3. Apply filters
@@ -510,6 +519,7 @@ export async function fetchUserDocumentsAction({
       status: doc.status,
       createdAt: new Date(doc.created_at),
       updatedAt: doc.updated_at ? new Date(doc.updated_at) : new Date(doc.created_at),
+      batchId: (doc as any).batch_id ?? null, // Cast to any to bypass type check
     }))
 
     return {
@@ -526,4 +536,4 @@ export async function fetchUserDocumentsAction({
       error: "500",
     }
   }
-} 
+}

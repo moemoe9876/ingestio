@@ -99,9 +99,6 @@ export default function UploadPage() {
       setUploadStage(UploadStage.PROCESSING);
       setProgress(0);
       
-      // Estimate page count - in real app, this should be detected from the file
-      const estimatedPageCount = 1; // Default to 1 for now
-      
       startTransition(async () => {
         try {
           // Convert File to base64 
@@ -116,7 +113,8 @@ export default function UploadPage() {
           };
           
           // Step 1: Upload document with serializable data
-          const uploadResult = await uploadDocumentAction(fileData, estimatedPageCount);
+          // pageCount argument removed as it's now determined server-side
+          const uploadResult = await uploadDocumentAction(fileData);
           
           if (!uploadResult.isSuccess) {
             throw new Error(uploadResult.message || "Failed to upload document");
@@ -415,4 +413,4 @@ export default function UploadPage() {
       </div>
     </div>
   );
-} 
+}
