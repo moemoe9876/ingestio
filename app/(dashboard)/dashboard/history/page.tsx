@@ -27,7 +27,8 @@ import DocumentViewer from "@/components/utilities/DocumentViewer";
 // --- Libraries & Utils ---
 import { useDebounce } from "@/lib/hooks/use-debounce";
 import { cn } from "@/lib/utils";
-import { format, formatDistanceToNow, isThisMonth, isThisWeek, isToday, isYesterday } from "date-fns";
+import { formatRelativeTime, fromUTC } from "@/lib/utils/date-utils";
+import { format, isThisMonth, isThisWeek, isToday, isYesterday } from "date-fns";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Clock3, Download, Eye, FileArchive, FileIcon as FileGeneric, FileImage, FileText, Inbox, Loader2, MoreHorizontal, RefreshCw, Search, SlidersHorizontal, Trash2, UploadCloud } from "lucide-react";
 import Link from "next/link";
@@ -51,15 +52,16 @@ type DocumentDetail = {
 
 // --- Helper Functions ---
 const getTimeGroup = (date: Date): string => {
-  if (isToday(date)) return "Today";
-  if (isYesterday(date)) return "Yesterday";
-  if (isThisWeek(date)) return "This Week";
-  if (isThisMonth(date)) return "This Month";
-  return format(date, "MMMM yyyy");
+  const localDate = fromUTC(date);
+  if (isToday(localDate)) return "Today";
+  if (isYesterday(localDate)) return "Yesterday";
+  if (isThisWeek(localDate)) return "This Week";
+  if (isThisMonth(localDate)) return "This Month";
+  return format(localDate, "MMMM yyyy");
 };
 
 const formatDateSmart = (dateStr: string | Date): string => {
-  const date = new Date(dateStr);
+  const date = fromUTC(typeof dateStr === "string" ? new Date(dateStr) : dateStr);
   if (isToday(date)) return format(date, "'Today at' p");
   if (isYesterday(date)) return format(date, "'Yesterday at' p");
   if (isThisWeek(date)) return format(date, "EEEE 'at' p");
@@ -67,7 +69,7 @@ const formatDateSmart = (dateStr: string | Date): string => {
 };
 
 const formatDateDetailed = (dateStr: string | Date): string => {
-  return formatDistanceToNow(new Date(dateStr), { addSuffix: true });
+  return formatRelativeTime(dateStr);
 };
 
 const formatFileSize = (bytes: number): string => {

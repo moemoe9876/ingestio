@@ -4,6 +4,7 @@ Defines the schema for documents and related document status enum.
 </ai_context>
 */
 
+import { createUTCDate } from "@/lib/utils/date-utils";
 import { integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { extractionBatchesTable } from "./extraction-batches-schema"; // Import batch schema
 import { profilesTable } from "./profiles-schema";
@@ -25,11 +26,11 @@ export const documentsTable = pgTable("documents", {
   fileSize: integer("file_size").notNull(),
   pageCount: integer("page_count").notNull(),
   status: documentStatusEnum("status").default("uploaded").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at")
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull()
-    .$onUpdate(() => new Date()),
+    .$onUpdate(() => createUTCDate()),
 });
 
 export type InsertDocument = typeof documentsTable.$inferInsert;

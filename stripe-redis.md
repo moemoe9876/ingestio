@@ -679,8 +679,8 @@ This plan assumes:
 
 ### Step FS.2: Connect "Manage Billing" Button
 
-*   [ ] **Task**: Implement the functionality for the "Manage Billing" button within the Settings page's "Subscription & Billing" tab.
-*   [ ] **Goal**: Allow users with an active Stripe subscription to securely access the Stripe Billing Portal.
+*   [x] **Task**: Implement the functionality for the "Manage Billing" button within the Settings page's "Subscription & Billing" tab.
+*   [x] **Goal**: Allow users with an active Stripe subscription to securely access the Stripe Billing Portal.
 *   **Files**: `app/(dashboard)/dashboard/settings/page.tsx`, `app/api/stripe/create-billing-portal/route.ts`, `actions/stripe/checkout-actions.ts`.
 *   **Instructions**:
     1.  **Conditional Rendering:** In `settings/page.tsx`, only render the "Manage Billing" button if `kvSubscriptionData?.customerId` exists (meaning the user has a Stripe customer record, likely from a previous or current subscription).
