@@ -3,7 +3,7 @@
 import { useResizeObserver } from "@wojtekmaj/react-hooks";
 import { debounce } from "lodash";
 import { AlertCircle } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
@@ -13,9 +13,10 @@ import { Button } from "@/components/ui/button";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { PdfHighlightLayer } from "./PdfHighlightLayer";
 
+// Recommended configuration as per react-pdf docs
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
 ).toString();
 
 const options = {
@@ -123,12 +124,23 @@ export default function PdfViewerUrl({
     };
   }, [containerRef]);
 
-  async function onDocumentLoadSuccess(page: PDFDocumentProxy): Promise<void> {
-    setError(null);
-    setNumPages(page._pdfInfo.numPages);
-    // Reset position and zoom on new document
-    setPosition({ x: 0, y: 0 });
-    setZoom(100);
+  async function onDocumentLoadSuccess(page: PDFDocumentProxy | null): Promise<void> {
+    if (!page || !page._pdfInfo) {
+      console.error("PDF document loaded but is null or missing _pdfInfo");
+      setError(new Error("Invalid PDF document"));
+      return;
+    }
+    
+    try {
+      setError(null);
+      setNumPages(page._pdfInfo.numPages);
+      // Reset position and zoom on new document
+      setPosition({ x: 0, y: 0 });
+      setZoom(100);
+    } catch (err) {
+      console.error("Error processing PDF document:", err);
+      setError(err instanceof Error ? err : new Error("Error processing PDF document"));
+    }
   }
 
   function onDocumentLoadError(err: Error): void {
@@ -307,88 +319,99 @@ export default function PdfViewerUrl({
     };
   }, [containerRef, zoom, updateZoom]);
 
+  // Cleanup event listeners for dragging
+  useEffect(() => {
+    // ... existing code ...
+  }, [isDragging, dragStart]);
+
+  // Return error UI if there's an error
+  if (error) {
+    return (
+      <div className={`flex flex-col h-full w-full ${className}`}>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error loading PDF</AlertTitle>
+          <AlertDescription>
+            {error.message || "Failed to load the document. Please try again."}
+          </AlertDescription>
+        </Alert>
+        <div className="mt-4 flex justify-center">
+          <Button onClick={() => window.location.reload()}>Reload Page</Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex flex-col h-full w-full box-border ${className || ''}`}>
+    <div
+      ref={setContainerRef}
+      className={`pdf-container w-full h-full overflow-auto relative ${className}`}
+    >
       <div
-        ref={setContainerRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden h-full w-full box-border"
+        ref={pdfContainerRef}
+        className="pdf-content"
+        style={{
+          transform: `scale(${zoom / 100})`,
+          transformOrigin: "top left",
+          transition: isDragging ? "none" : "transform 0.1s ease-out",
+          translate: `${position.x}px ${position.y}px`,
+          cursor: isDragging ? "grabbing" : dragMode ? "grab" : "default",
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
       >
-        {error ? (
-          <Alert variant="destructive" className="mb-4">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>
-              Failed to load PDF document. {error.message}
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <div 
-            ref={pdfContainerRef}
-            className="h-full w-full box-border"
-            style={{ 
-              cursor: isDragging ? 'grabbing' : (dragMode ? 'grab' : 'default'),
-              position: 'relative'
-            }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-          >
-            <div style={{ 
-              transform: `scale(${zoom / 100})`, 
-              transformOrigin: 'top center',
-              transition: isDragging ? 'none' : 'transform 0.1s ease-out',
-              translate: `${position.x}px ${position.y}px`
-            }}>
-              <Document
-                file={url}
-                onLoadSuccess={onDocumentLoadSuccess}
-                onLoadError={onDocumentLoadError}
-                options={options}
-                loading={<div className="text-center py-4">Loading PDF...</div>}
-              >
-                {Array.from(new Array(numPages), (_el, index) => {
-                  const pageNumber = index + 1;
-                  return (
-                    <div 
-                      key={`page_container_${pageNumber}`} 
-                      className="relative mb-4"
-                      ref={refCallbacks[index]}
-                    >
-                      <Page
-                        key={`page_${pageNumber}`}
-                        pageNumber={pageNumber}
-                        width={containerWidth}
-                        renderTextLayer={true}
-                        renderAnnotationLayer={true}
-                        onRenderSuccess={(page) => handlePageRenderSuccess(page, pageNumber)}
-                      />
-                      
-                      {/* Add highlight layer for each page */}
-                      <PdfHighlightLayer
-                        highlights={highlights}
-                        currentPage={pageNumber}
-                        containerWidth={containerWidth || 0}
-                        containerHeight={pageHeights[index] || 0}
-                        scale={zoom / 100}
-                        position={position}
-                      />
-                      
-                      {/* Add a transparent overlay for click handling */}
-                      <div 
-                        className="absolute inset-0"
-                        onClick={(e) => handleTextLayerClick(e, pageNumber)}
-                        style={{ 
-                          pointerEvents: onPositionClick && !isDragging && !dragMode ? 'auto' : 'none',
-                          cursor: 'default'
-                        }}
-                      />
-                    </div>
-                  );
-                })}
-              </Document>
-            </div>
+        <ErrorBoundary fallback={
+          <div className="p-8 bg-muted rounded-md">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>PDF Rendering Error</AlertTitle>
+              <AlertDescription>
+                The PDF document could not be rendered. Try a different file format or reload the page.
+              </AlertDescription>
+            </Alert>
           </div>
-        )}
+        }>
+          <Document
+            key={url}
+            file={url}
+            onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={onDocumentLoadError}
+            options={options}
+            loading={
+              <div className="text-center py-10">
+                <div className="inline-block animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent mb-2"></div>
+                <p>Loading document...</p>
+              </div>
+            }
+            className="mb-4"
+          >
+            {/* Conditionally render pages based on numPages */}
+            {Array.from(new Array(numPages || 0), (_, index) => (
+              <div
+                key={`page_${index + 1}`}
+                ref={refCallbacks[index]}
+                className="page-container mb-4 relative"
+              >
+                <Page
+                  key={`page_${index + 1}_${zoom}`}
+                  pageNumber={index + 1}
+                  width={containerWidth ? containerWidth : undefined}
+                  onRenderSuccess={(page) => handlePageRenderSuccess(page, index + 1)}
+                  className="pdf-page shadow-md"
+                />
+                
+                {/* Highlight layer */}
+                <PdfHighlightLayer
+                  pageNumber={index + 1}
+                  highlights={highlights}
+                  onPositionClick={onPositionClick}
+                  dragMode={dragMode}
+                />
+              </div>
+            ))}
+          </Document>
+        </ErrorBoundary>
       </div>
       
       {/* Add page navigation controls */}
@@ -417,4 +440,32 @@ export default function PdfViewerUrl({
       )}
     </div>
   );
+}
+
+// Error boundary component
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    // Update state so the next render will show the fallback UI
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("PDF Rendering Error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+
+    return this.props.children;
+  }
 } 

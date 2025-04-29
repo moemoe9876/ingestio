@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbo",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -90,6 +90,7 @@
     "motion": "^12.9.2",
     "next": "15.3.1",
     "next-themes": "^0.4.6",
+    "next-transpile-modules": "^10.0.1",
     "pdf-lib": "^1.17.1",
     "postgres": "^3.4.5",
     "posthog-js": "^1.236.8",
@@ -138,7 +139,6 @@
     "nodemon": "^3.1.10",
     "postcss": "^8.5.3",
     "prettier": "^3.5.3",
-    "supabase": "^2.22.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"

@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useState, useRef } from "react";
-import { pdfjs, Document, Page } from "react-pdf";
+import { useResizeObserver } from "@wojtekmaj/react-hooks";
+import { AlertCircle, MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
-import { useResizeObserver } from "@wojtekmaj/react-hooks";
-import { AlertCircle, ZoomIn, ZoomOut, MoveHorizontal } from "lucide-react";
 
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -15,12 +16,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 
+// Recommended configuration as per react-pdf docs
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
 ).toString();
 
 const options = {

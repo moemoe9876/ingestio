@@ -34,7 +34,35 @@ const nextConfig = {
     ];
   },
   // This is required to support PostHog trailing slash API requests
-  skipTrailingSlashRedirect: true
+  skipTrailingSlashRedirect: true,
+  
+  // Turbopack configuration
+  experimental: {
+    turbo: {
+      resolveAlias: {
+        canvas: './empty-module.ts',
+      },
+    },
+  },
+  
+  turbopack: {
+    // Default extensions to resolve with Turbopack
+    resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json', '.css'],
+    
+    // Custom loader rules for specific file types
+    rules: {
+      // Example: Add SVG support if needed
+      '*.svg': {
+        loaders: ['@svgr/webpack'],
+        as: '*.js',
+      },
+    },
+    
+    // Optional: Add resolve aliases for cleaner imports
+    resolveAlias: {
+      // Example: '@/*': './src/*'
+    }
+  }
 };
 
 export default nextConfig

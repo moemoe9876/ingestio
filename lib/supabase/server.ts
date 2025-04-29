@@ -2,7 +2,7 @@
 
 import { Database } from "@/types";
 import { auth } from "@clerk/nextjs/server";
-import { createServerClient as createSupabaseServerClient } from "@supabase/ssr";
+import { type CookieOptions, createServerClient as createSupabaseServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
@@ -34,25 +34,22 @@ export async function createServerClient() {
     {
       ...authToken,
       cookies: {
-        get(name) {
-          return cookieStore.get(name)?.value;
+        async getAll() {
+          return (await cookieStore).getAll();
         },
-        set(name, value, options) {
+        setAll(cookiesToSet: { name: string, value: string, options: CookieOptions }[]) {
           try {
-            cookieStore.set(name, value, options);
+            cookiesToSet.forEach(async ({ name, value, options }) =>
+              (await cookieStore).set(name, value, options)
+            );
           } catch (error) {
-            // The cookies.set function throws in middleware or when cookies are already sent
-            // This catch is specifically for middleware cases
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+            // Also handles potential errors in specific environments (like middleware)
+            console.warn("setAll cookie error ignored in createServerClient:", error);
           }
         },
-        remove(name, options) {
-          try {
-            cookieStore.set(name, "", { ...options, maxAge: 0 });
-          } catch (error) {
-            // The cookies.set function throws in middleware or when cookies are already sent
-            // This catch is specifically for middleware cases
-          }
-        }
       }
     }
   );

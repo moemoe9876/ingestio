@@ -1,12 +1,10 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { UserNav } from "@/components/utilities/user-nav";
 import { useAuth as useClerkAuth, useUser } from "@clerk/nextjs";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileText, Loader2, Menu, Moon, Sun, X } from "lucide-react";
-import { useTheme } from "next-themes";
+import { FileText, Loader2, Menu, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -27,7 +25,6 @@ export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState("hero");
-  const { theme, setTheme } = useTheme();
   const { user, isLoaded } = useUser();
   const { signOut } = useClerkAuth();
   const loading = !isLoaded;
@@ -120,25 +117,6 @@ export function Header() {
 
         {/* Desktop actions */}
         <div className="hidden md:flex items-center gap-4">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                >
-                  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                  <span className="sr-only">Toggle theme</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Toggle {theme === "dark" ? "light" : "dark"} mode</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
           {loading ? (
             <Loader2 className="h-5 w-5 animate-spin" />
           ) : user ? (
@@ -195,22 +173,6 @@ export function Header() {
                   </Link>
                 </motion.div>
               ))}
-              
-              {/* Mobile theme toggle */}
-              <div className="flex items-center justify-between pt-2 border-t">
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8 rounded-full"
-                    onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                  >
-                    {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                    <span className="sr-only">Toggle theme</span>
-                  </Button>
-                  <span className="text-sm">Theme</span>
-                </div>
-              </div>
               
               {/* Mobile auth actions */}
               <div className="flex flex-col gap-2 pt-2 border-t">

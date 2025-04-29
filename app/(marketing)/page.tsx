@@ -33,7 +33,6 @@ import {
     Workflow,
     Zap
 } from "lucide-react"
-import { useTheme } from "next-themes"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
 
@@ -42,7 +41,6 @@ export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false)
   const [activeSection, setActiveSection] = useState("hero")
   const [isCheckoutLoading, setIsCheckoutLoading] = useState<string | null>(null)
-  const { theme, setTheme } = useTheme()
   const heroRef = useRef<HTMLElement>(null)
   const featuresRef = useRef<HTMLElement>(null)
   const howItWorksRef = useRef<HTMLElement>(null)

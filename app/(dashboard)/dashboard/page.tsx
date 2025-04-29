@@ -236,42 +236,52 @@ export default function DashboardPage() {
                 <ScrollArea className="h-[400px] pr-4">
                   <div className="space-y-3">
                     {recentDocuments.map((doc) => (
-                      <Link 
-                        href={`/dashboard/review/${doc.id}`}
+                      <div 
                         key={doc.id} 
-                        className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors group"
+                        className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/50 transition-colors group relative"
                       >
-                        {getFileIcon(doc.mimeType)}
-                        <div className="flex-1 min-w-0">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <p className="text-sm font-medium truncate">
-                                  {doc.originalFilename}
-                                </p>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{doc.originalFilename}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {formatFileSize(doc.fileSize)} • {doc.pageCount} {doc.pageCount === 1 ? 'page' : 'pages'}
-                                </p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                          <p className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(doc.createdAt), { addSuffix: true })}
-                          </p>
-                        </div>
-                        <Badge 
-                          variant="outline"
-                          className={`capitalize ml-auto ${getStatusColorClasses(doc.status)}`}
+                        <Link 
+                          href={`/dashboard/review/${doc.id}`}
+                          className="absolute inset-0 z-0"
+                          aria-label={`View details for ${doc.originalFilename}`}
                         >
-                          <span className="flex items-center gap-1">
-                            {getStatusIcon(doc.status)}
-                            <span>{doc.status}</span>
-                          </span>
-                        </Badge>
-                        <div className="hidden group-hover:flex items-center gap-1">
+                          <span className="sr-only">View details</span>
+                        </Link>
+                        
+                        <div className="flex items-center gap-3 w-full relative z-10 pointer-events-none">
+                          {getFileIcon(doc.mimeType)}
+                          <div className="flex-1 min-w-0">
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <p className="text-sm font-medium truncate">
+                                    {doc.originalFilename}
+                                  </p>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>{doc.originalFilename}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {formatFileSize(doc.fileSize)} • {doc.pageCount} {doc.pageCount === 1 ? 'page' : 'pages'}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(doc.createdAt), { addSuffix: true })}
+                            </p>
+                          </div>
+                          <Badge 
+                            variant="outline"
+                            className={`capitalize ml-auto ${getStatusColorClasses(doc.status)}`}
+                          >
+                            <span className="flex items-center gap-1">
+                              {getStatusIcon(doc.status)}
+                              <span>{doc.status}</span>
+                            </span>
+                          </Badge>
+                        </div>
+                        
+                        <div className="relative z-10 pointer-events-auto ml-2">
                           <Button 
                             variant="ghost" 
                             size="icon" 
@@ -283,9 +293,8 @@ export default function DashboardPage() {
                               <span className="sr-only">View</span>
                             </Link>
                           </Button>
-                          {/* Note: Delete functionality would need an action handler */}
                         </div>
-                      </Link>
+                      </div>
                     ))}
                   </div>
                 </ScrollArea>

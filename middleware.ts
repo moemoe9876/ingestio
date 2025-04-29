@@ -11,7 +11,7 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/login(.*)",
   "/signup(.*)",
-  "/api/webhook/clerk",
+  "/api/webhooks/clerk",
   "/pricing",
   "/about",
   "/contact",
@@ -20,7 +20,6 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 // Define dashboard routes that require authentication
-// Note: Be careful with profile routes to allow Clerk components to work properly
 const isDashboardRoute = createRouteMatcher([
   "/dashboard",
   "/dashboard/upload(.*)",
@@ -28,11 +27,8 @@ const isDashboardRoute = createRouteMatcher([
   "/dashboard/history(.*)",
   "/dashboard/metrics(.*)",
   "/dashboard/settings(.*)",
+  "/dashboard/batch-upload(.*)",
   "/dashboard/billing(.*)",
-  // For profile, protect the main route but allow Clerk to handle sub-routes
-  "/dashboard/profile",
-  // Don't protect profile routes with catch-all paths to allow Clerk components to work
-  // "/dashboard/profile/(.*)" - explicitly excluding
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
@@ -55,8 +51,8 @@ export const config = {
     "/contact",
     "/terms",
     "/privacy",
-    // Explicitly exclude Clerk component routes
-    "/((?!dashboard/profile/.*|_next|.*\\.(?:jpg|jpeg|gif|png|webp|svg|ico)).*)",
+    // Explicitly exclude Clerk webhook routes and static assets
+    "/((?!api/webhooks/clerk|_next|.*\\.(?:jpg|jpeg|gif|png|webp|svg|ico)).*)",
   ],
 };
 

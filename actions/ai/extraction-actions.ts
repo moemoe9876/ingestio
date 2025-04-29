@@ -488,7 +488,6 @@ export async function extractDocumentDataAction(
         .from('extraction_jobs')
         .update({
           status: "completed",
-          data: extractedData,
           updated_at: new Date().toISOString()
         })
         .eq('id', extractionJob.id)

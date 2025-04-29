@@ -6,59 +6,87 @@
 body {
     /* Ensure no extra scrollbars appear due to fixed elements */
     overscroll-behavior: none;
-  }
-  
-  /* Example: Style adjustments based on the source theme.css */
-  :root {
+    
+    /* Smooth theme transitions */
+    transition: color 0.3s ease, background-color 0.3s ease;
+}
+
+.dark body {
+    color-scheme: dark;
+}
+
+* {
+    /* Add smooth transitions for theme changes */
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+    transition-duration: 0.3s;
+    transition-timing-function: ease;
+}
+
+/* Example: Style adjustments based on the source theme.css */
+:root {
     /* --header-height is already defined in globals.css */
-  }
-  
-  /* Example scaling from source (optional, adjust breakpoint if needed) */
-  .theme-scaled {
+}
+
+/* Example scaling from source (optional, adjust breakpoint if needed) */
+.theme-scaled {
     @media (min-width: 1024px) {
-      --radius: 0.6rem;
-      --text-lg: 1.05rem;
-      --text-base: 0.85rem;
-      --text-sm: 0.8rem;
-      --spacing: 0.222222rem;
+        --radius: 0.6rem;
+        --text-lg: 1.05rem;
+        --text-base: 0.85rem;
+        --text-sm: 0.8rem;
+        --spacing: 0.222222rem;
     }
-  
+
     [data-slot="card"] {
-      --spacing: 0.16rem;
+        --spacing: 0.16rem;
     }
-  
+
     [data-slot="select-trigger"],
     [data-slot="toggle-group-item"] {
-      --spacing: 0.222222rem;
+        --spacing: 0.222222rem;
     }
-  }
-  
-  /* Example theme color overrides from source (optional) */
-  .theme-default,
-  .theme-default-scaled {
+}
+
+/* Example theme color overrides from source (optional) */
+.theme-default,
+.theme-default-scaled {
     /* You might adjust primary/foreground specifically for the dashboard here */
     /* Example:
     --primary: hsl(0, 0%, 40%);
     .dark & {
-      --primary: hsl(0, 0%, 60%);
+        --primary: hsl(0, 0%, 60%);
     }
     */
-  }
-  
-  /* Add other theme overrides (blue, green, amber, mono) if you implement the theme selector */
-  
-  /* Ensure the main content area respects the header height */
-  main {
+}
+
+/* Add other theme overrides (blue, green, amber, mono) if you implement the theme selector */
+
+/* Ensure the main content area respects the header height */
+main {
     padding-top: 0; /* Header is sticky, main content flows underneath */
-  }
-  
-  /* Style for the inset sidebar variant (if using) */
-  [data-slot="sidebar-wrapper"][data-variant="inset"] {
+}
+
+/* Style for the inset sidebar variant (if using) */
+[data-slot="sidebar-wrapper"][data-variant="inset"] {
     /* background might be needed if body bg doesn't match sidebar bg */
     /* background-color: var(--sidebar); */
-  }
-  
-  /* Ensure the main content area within the inset layout has appropriate styling */
-  /* This is handled by the padding adjustments in globals.css now */
-  
-  /* Add any other specific dashboard styles here */
+}
+
+/* Ensure the theme toggle has a nice effect */
+.sun-icon {
+    transform: scale(0);
+}
+
+.moon-icon {
+    transform: scale(0);
+}
+
+.dark .sun-icon {
+    transform: scale(1);
+}
+
+.light .moon-icon {
+    transform: scale(1);
+}
+
+/* Add any other specific dashboard styles here */

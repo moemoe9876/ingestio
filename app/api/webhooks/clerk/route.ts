@@ -5,14 +5,14 @@ import { createClerkAdminClient } from './clerk-client';
 
 export async function POST(req: Request) {
   // Get the webhook signature from the headers
-  const headerPayload = headers();
+  const headerPayload = await headers();
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
   const svix_signature = headerPayload.get("svix-signature");
 
   // If there are no headers, error out
   if (!svix_id || !svix_timestamp || !svix_signature) {
-    return new Response('Missing svix headers', { status: 400 });
+    return Response.json({ error: 'Missing svix headers' }, { status: 400 });
   }
 
   // Get the body
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     }) as WebhookEvent;
   } catch (err) {
     console.error('Error verifying webhook:', err);
-    return new Response('Error verifying webhook', { status: 400 });
+    return Response.json({ error: 'Error verifying webhook' }, { status: 400 });
   }
 
   // Get Supabase admin client 
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     const primaryEmail = email_addresses?.[0]?.email_address;
     
     if (!primaryEmail) {
-      return new Response('No email address found', { status: 400 });
+      return Response.json({ error: 'No email address found' }, { status: 400 });
     }
     
     // Combine first and last name if available
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
       
       if (userError) {
         console.error('Error creating user in users table:', userError);
-        return new Response('Error creating user in users table', { status: 500 });
+        return Response.json({ error: 'Error creating user in users table' }, { status: 500 });
       }
       
       // 2. Then, insert into the profiles table (subscription/membership info)
@@ -90,14 +90,14 @@ export async function POST(req: Request) {
         // If profile creation fails, attempt to clean up the user record to maintain consistency
         await supabase.from('users').delete().eq('user_id', id);
         console.error('Error creating profile in profiles table:', profileError);
-        return new Response('Error creating profile in profiles table', { status: 500 });
+        return Response.json({ error: 'Error creating profile in profiles table' }, { status: 500 });
       }
       
       console.log('User and profile created in Supabase:', id);
-      return new Response('User and profile created in Supabase', { status: 200 });
+      return Response.json({ message: 'User and profile created in Supabase' }, { status: 200 });
     } catch (error) {
       console.error('Error syncing user data to Supabase:', error);
-      return new Response('Error syncing user data to Supabase', { status: 500 });
+      return Response.json({ error: 'Error syncing user data to Supabase' }, { status: 500 });
     }
   }
   
@@ -209,10 +209,10 @@ export async function POST(req: Request) {
       }
       
       console.log('User and/or profile updated in Supabase:', id);
-      return new Response('User and/or profile updated in Supabase', { status: 200 });
+      return Response.json({ message: 'User and/or profile updated in Supabase' }, { status: 200 });
     } catch (error) {
       console.error('Error syncing user update to Supabase:', error);
-      return new Response('Error syncing user update to Supabase', { status: 500 });
+      return Response.json({ error: 'Error syncing user update to Supabase' }, { status: 500 });
     }
   }
 
@@ -225,7 +225,7 @@ export async function POST(req: Request) {
       
       // Ensure id is defined before proceeding
       if (!id) {
-        return new Response('Missing user ID in delete webhook', { status: 400 });
+        return Response.json({ error: 'Missing user ID in delete webhook' }, { status: 400 });
       }
       
       // 1. Delete from profiles table
@@ -247,17 +247,17 @@ export async function POST(req: Request) {
       
       if (userError) {
         console.error('Error deleting user from Supabase:', userError);
-        return new Response('Error deleting user from Supabase', { status: 500 });
+        return Response.json({ error: 'Error deleting user from Supabase' }, { status: 500 });
       }
       
       console.log('User and profile deleted from Supabase:', id);
-      return new Response('User and profile deleted from Supabase', { status: 200 });
+      return Response.json({ message: 'User and profile deleted from Supabase' }, { status: 200 });
     } catch (error) {
       console.error('Error deleting user from Supabase:', error);
-      return new Response('Error deleting user from Supabase', { status: 500 });
+      return Response.json({ error: 'Error deleting user from Supabase' }, { status: 500 });
     }
   }
 
-  return new Response('Webhook received', { status: 200 });
+  return Response.json({ message: 'Webhook received' }, { status: 200 });
 } 
 

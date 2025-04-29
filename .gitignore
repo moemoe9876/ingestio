@@ -84,3 +84,6 @@ Thumbs.db
 # Optional: Turbo repo cache
 .turbo
 
+
+# clerk configuration (can include secrets)
+/.clerk/

@@ -16,24 +16,40 @@ export function UserInitializer() {
     async function initializeUserProfile() {
       if (userId && !initialized) {
         try {
+          console.log(`Starting initialization for user ${userId}`)
+          
           // First, check if user has a profile
           const profileRes = await getProfileByUserIdAction(userId)
           
           if (!profileRes.isSuccess) {
+            console.log(`Profile not found for user ${userId}, creating one...`)
             // Create profile if missing
-            await getProfileAction({ userId })
-            console.log("User profile created successfully")
+            const createProfileRes = await getProfileAction({ userId })
+            
+            if (!createProfileRes.isSuccess) {
+              console.error(`Failed to create profile for user ${userId}: ${createProfileRes.message}`)
+              // Don't continue if profile creation failed
+              return
+            }
+            
+            console.log(`Profile created successfully for user ${userId}`)
+          } else {
+            console.log(`Profile found for user ${userId}`)
           }
           
-          // Then initialize usage records
+          // Only attempt to initialize usage after confirming profile exists
+          console.log(`Initializing usage for user ${userId}`)
           const usageRes = await initializeUserUsageAction(userId)
+          
           if (usageRes.isSuccess) {
-            console.log("User usage initialized successfully")
+            console.log(`User usage initialized successfully for user ${userId}`)
+          } else {
+            console.error(`Failed to initialize usage for user ${userId}: ${usageRes.message}`)
           }
           
           setInitialized(true)
         } catch (error) {
-          console.error("Error initializing user profile:", error)
+          console.error(`Error initializing user profile for ${userId}:`, error)
         }
       }
     }
