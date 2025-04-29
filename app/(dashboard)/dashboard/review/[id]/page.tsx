@@ -53,12 +53,10 @@ import {
   Loader2,
   RotateCw
 } from "lucide-react";
-import { useEffect, useState, useTransition } from "react";
+import { use, useEffect, useState, useTransition } from "react";
 
 interface PageProps {
-  params: {
-    id: string;
-  };
+  params: Promise<{ id: string }>;
 }
 
 // Define types for our data structure
@@ -95,7 +93,7 @@ interface ExtractionMetadata {
 }
 
 export default function ReviewPage({ params }: PageProps) {
-  const { id } = params;
+  const { id } = use(params);
   const documentId = id;
   const { toast } = useToast();
   const [editMode, setEditMode] = useState(false);
