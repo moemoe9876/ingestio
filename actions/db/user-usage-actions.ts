@@ -255,7 +255,8 @@ export async function updateUserUsageAction(
       .where(whereClause)
       .returning();
     
-    console.log(`[updateUserUsageAction] Update result:`, updated);
+    console.log(`[updateUserUsageAction] Update result:`, 
+      updated ? `ID: ${updated.id}, period: ${updated.billingPeriodStart.toISOString()} to ${updated.billingPeriodEnd.toISOString()}, processed: ${updated.pagesProcessed}` : 'No record updated');
     
     if (!updated) {
       return {
