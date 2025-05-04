@@ -61,7 +61,7 @@ Return the results in a structured JSON format. Include a confidence score (0.0 
 export const SYSTEM_INSTRUCTIONS = `
 You are an AI assistant specialized in extracting structured data from documents.
 Follow these guidelines:
-1. Extract information according to the user's instructions.
+1. Adhere Strictly to User Request: Extract ONLY the fields and information explicitly mentioned or clearly implied by the user's prompt below. Do NOT include any extra fields, even if common for the document type, unless the user asks for 'all information' or similar broad terms.
 2. Return results in properly formatted JSON.
 3. Include confidence scores (0.0 to 1.0) for each extracted value.
 4. For tables or lists, maintain their structure in the JSON output.
@@ -72,44 +72,57 @@ Follow these guidelines:
 `;
 
 /**
- * Enhances a user prompt with system instructions and formatting requirements
- * @param userPrompt - The prompt provided by the user
- * @param includeConfidence - Whether to add instructions for confidence scores
- * @param includePositions - Whether to add instructions for position data
- * @returns Enhanced prompt with system instructions
+ * Enhances a user prompt with system instructions, contextual hints,
+ * and formatting requirements based on provided flags.
+ * 
+ * @param userPrompt - The base prompt (potentially enhanced by classification)
+ * @param includeConfidence - Whether to request internal confidence scoring
+ * @param includePositions - Whether to request internal position noting
+ * @param detectedLanguage - Optional detected language hint
+ * @returns Fully constructed prompt ready for the AI
  */
 export function enhancePrompt(
   userPrompt: string,
-  includeConfidence: boolean = true,
-  includePositions: boolean = false
+  includeConfidence: boolean = true, 
+  includePositions: boolean = false,
+  detectedLanguage?: string
 ): string {
-  console.log("[PROMPT DEBUG] Original user prompt:", userPrompt);
-  
-  let enhancedPrompt = userPrompt.trim();
+  console.log("[PROMPT DEBUG] Base user prompt for enhancement:", userPrompt);
 
-  // Add JSON structure guidance if not already present
-  if (!enhancedPrompt.toLowerCase().includes('json') && !enhancedPrompt.toLowerCase().includes('structure')) {
-    enhancedPrompt += ' Return the results in a structured JSON format.';
+  let finalPromptParts: string[] = [];
+
+  // 1. Start with System Instructions
+  finalPromptParts.push(SYSTEM_INSTRUCTIONS);
+
+  // 2. Add Contextual Hints
+  if (detectedLanguage) {
+    finalPromptParts.push(`Context: The document appears to be in ${detectedLanguage}. The user's request is:`);
+  } else {
+    finalPromptParts.push("Context: The user's request is:");
   }
-  
-  // Add confidence score instruction if requested
-  if (includeConfidence && !enhancedPrompt.toLowerCase().includes('confidence')) {
-    enhancedPrompt += ' Include a confidence score (0.0 to 1.0) for each extracted field.';
+
+  // 3. Append the (potentially classification-enhanced) User Prompt
+  finalPromptParts.push(userPrompt.trim());
+
+  // 4. Add Internal AI Guidance based on flags
+  let internalGuidance = [];
+  if (includeConfidence) {
+    internalGuidance.push("- Internally, assign a confidence score (0.0-1.0) to each extracted value.");
   }
-  
-  // Add position data instruction if requested
-  if (includePositions && !enhancedPrompt.toLowerCase().includes('position')) {
-    enhancedPrompt += ' Include position data (page number and bounding box coordinates) for each extracted field.';
+  if (includePositions) {
+    internalGuidance.push("- Internally, note the position (page number, bounding box) for each value.");
   }
-  
-  // Add strict instruction to follow the prompt exactly
-  if (!enhancedPrompt.toLowerCase().includes('only') && !enhancedPrompt.toLowerCase().includes('exactly')) {
-    enhancedPrompt += ' Extract ONLY the information specified in this prompt and nothing else.';
+
+  if (internalGuidance.length > 0) {
+    finalPromptParts.push("\nInternal AI Guidance (Do NOT include this info in the final JSON output):\n" + internalGuidance.join("\n"));
   }
-  
-  console.log("[PROMPT DEBUG] Enhanced prompt:", enhancedPrompt);
-  
-  return enhancedPrompt;
+
+  // Construct the final prompt string
+  const finalEnhancedPrompt = finalPromptParts.join("\n\n");
+
+  console.log("[PROMPT DEBUG] Final enhanced prompt for AI:", finalEnhancedPrompt);
+
+  return finalEnhancedPrompt;
 }
 
 /**

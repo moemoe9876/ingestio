@@ -73,7 +73,7 @@ Ingestio currently uses Google Vertex AI (Gemini 2.0 Flash), Sane Stripe/KV stor
     *   **User Instructions**: Implement the first pass for classification. Use the classification result (e.g., 'invoice') in the second pass to select a more specific default prompt (via `getDefaultPrompt`) or add context to the user's custom prompt before enhancement.
 
 
-*   [ ] **Step 2.2: Define Flexible System Instructions**
+*   [x] **Step 2.2: Define Flexible System Instructions**
     *   **Task**: Update `SYSTEM_INSTRUCTIONS` in `prompts/extraction.ts` to be general yet directive, focusing on following user requests and output format, explicitly forbidding positional data in the final output.
     *   **Files**: `prompts/extraction.ts` (Modify `SYSTEM_INSTRUCTIONS`).
     *   **Rationale**: Guides the AI consistently across all document types without relying on specific examples. Addresses the requirement to exclude positional data.
@@ -88,7 +88,7 @@ Ingestio currently uses Google Vertex AI (Gemini 2.0 Flash), Sane Stripe/KV stor
         5. Data Integrity: If requested information is not found, use null for the value. Format dates as YYYY-MM-DD if possible. Extract currency symbols if present.
         ```
 
-*   [ ] **Step 2.3: Enhance Dynamic Prompt Generation (`enhancePrompt`)**
+*   [x] **Step 2.3: Enhance Dynamic Prompt Generation (`enhancePrompt`)**
     *   **Task**: Update `enhancePrompt` to combine the `SYSTEM_INSTRUCTIONS`, the raw `userPrompt`, contextual hints (language), and flags for confidence/positions *for the AI's internal use only*.
     *   **Files**: `prompts/extraction.ts` (Update `enhancePrompt`).
     *   **Rationale**: Creates the final prompt sent to the AI, ensuring all necessary instructions are included.
