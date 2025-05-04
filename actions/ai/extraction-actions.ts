@@ -8,6 +8,15 @@ import { getCurrentUser } from "@/lib/auth-utils";
 import { mergeSegmentResults, segmentDocument, shouldSegmentDocument } from "@/lib/preprocessing/document-segmentation";
 import { checkRateLimit, createRateLimiter, isBatchSizeAllowed, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
+import {
+  CLASSIFICATION_SYSTEM_INSTRUCTIONS,
+  ClassificationResponse,
+  ClassificationResponseSchema,
+  DocumentType,
+  enhancePromptWithClassification,
+  getClassificationPrompt,
+  getDefaultPromptForType
+} from "@/prompts/classification";
 import { enhancePrompt, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";
 import { withTracing } from '@posthog/ai'; // Import PostHog AI wrapper
@@ -124,6 +133,7 @@ const extractDocumentSchema = z.object({
   useSegmentation: z.boolean().optional().default(true), // New option to enable/disable segmentation
   segmentationThreshold: z.number().optional().default(10), // Page threshold to trigger segmentation
   maxPagesPerSegment: z.number().optional().default(10), // Maximum pages per segment
+  skipClassification: z.boolean().optional().default(false), // Option to skip the classification step
 });
 
 /**
@@ -205,6 +215,84 @@ async function applyRateLimiting(userId: string, batchSize: number = 1): Promise
 }
 
 /**
+ * Classifies a document based on its content using structured output
+ * @param fileData Document data as a Blob
+ * @param mimeType Document MIME type
+ * @param traceId Trace ID for tracking
+ * @returns Structured classification response containing type, confidence, and reasoning
+ */
+async function classifyDocument(
+  fileData: Blob,
+  mimeType: string,
+  traceId: string
+): Promise<ClassificationResponse> {
+  const defaultResponse: ClassificationResponse = {
+    documentType: "other",
+    confidence: 0.1, 
+    reasoning: "Classification failed or produced invalid output."
+  };
+
+  try {
+    const classificationPrompt = getClassificationPrompt();
+    const arrayBuffer = await fileData.arrayBuffer();
+    const fileBase64 = Buffer.from(arrayBuffer).toString('base64');
+    
+    const observableModel = withTracing(
+      getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH),
+      phClient,
+      {
+        posthogDistinctId: traceId,
+        posthogProperties: {
+          actionName: "classifyDocument",
+          mimeType: mimeType
+        }
+      }
+    );
+    
+    try {
+      const result = await generateObject({
+        model: observableModel,
+        schema: ClassificationResponseSchema,
+        messages: [
+          {
+            role: "system",
+            content: CLASSIFICATION_SYSTEM_INSTRUCTIONS // Make sure this is imported or defined
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: classificationPrompt },
+              { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: mimeType }
+            ]
+          }
+        ],
+        temperature: 0.1, // Allow a little flexibility for classification
+      });
+      
+      // Validate the object structure against the schema (generateObject does this, but belt-and-suspenders)
+      const validatedResult = ClassificationResponseSchema.safeParse(result.object);
+      
+      if (validatedResult.success) {
+        console.log("[classifyDocument] Classification successful:", validatedResult.data);
+        return validatedResult.data;
+      } else {
+        console.error("[classifyDocument] AI response failed Zod validation:", validatedResult.error);
+        defaultResponse.reasoning = `Classification failed Zod validation: ${validatedResult.error.message}`;
+        return defaultResponse;
+      }
+    } catch (error) {
+      console.error("[classifyDocument] Error during generateObject:", error);
+      defaultResponse.reasoning = error instanceof Error ? error.message : "Unknown error during generateObject";
+      return defaultResponse;
+    }
+  } catch (error) {
+    console.error("[classifyDocument] Top-level error:", error);
+    defaultResponse.reasoning = error instanceof Error ? error.message : "Unknown top-level error";
+    return defaultResponse;
+  }
+}
+
+/**
  * Server action to extract data from a document using Vertex AI
  * @param input Extraction parameters conforming to extractDocumentSchema
  * @param invokedByBatchProcessor Optional flag to indicate if called by the batch processor (skips usage increment)
@@ -231,12 +319,13 @@ export async function extractDocumentDataAction(
     const { 
       documentId, 
       extractionPrompt,
+      includeConfidence,
+      includePositions,
       useSegmentation,
       segmentationThreshold,
-      maxPagesPerSegment
+      maxPagesPerSegment,
+      skipClassification
     } = parsedInput.data;
-    const includeConfidence = true;  // Always include confidence
-    const includePositions = true;   // Always include positions
     
     // Generate trace ID for PostHog LLM tracking
     const traceId = randomUUID();
@@ -298,6 +387,19 @@ export async function extractDocumentDataAction(
       };
     }
 
+    // Download document file (we need it for classification)
+    // @ts-ignore - Potential storage path property issue
+    const { data: fileData, error: fileError } = await supabase.storage
+      .from('documents')
+      .download(document.storage_path);
+      
+    if (fileError || !fileData) {
+      return {
+        isSuccess: false,
+        message: `Failed to download document: ${fileError?.message || "Unknown error"}`
+      };
+    }
+
     // Create extraction job
     // @ts-ignore - Potential schema type mismatch 
     const { data: extractionJob, error: jobError } = await supabase
@@ -312,7 +414,8 @@ export async function extractDocumentDataAction(
           includePositions,
           useSegmentation,
           segmentationThreshold,
-          maxPagesPerSegment
+          maxPagesPerSegment,
+          skipClassification
         }
       })
       .select()
@@ -325,13 +428,69 @@ export async function extractDocumentDataAction(
       };
     }
 
-    // Prepare user prompt
-    const userPromptText = extractionPrompt || "Extract all relevant information from this document.";
-    const enhancedPrompt = enhancePrompt(
-      userPromptText, 
-      includeConfidence, 
-      includePositions
-    );
+    // STEP 1: Document Classification (two-stage extraction)
+    let classificationResult: ClassificationResponse = {
+      documentType: "other",
+      confidence: 0.0,
+      reasoning: "Classification skipped or failed early."
+    };
+    let documentType: DocumentType = "other"; // Keep this for prompt logic
+    let finalPrompt: string; // Declare finalPrompt here
+    
+    if (!skipClassification) {
+      try {
+        // Perform document classification - Now returns the full object
+        classificationResult = await classifyDocument(fileData, document.mime_type, traceId);
+        documentType = classificationResult.documentType; // Extract the type string
+        
+        // Track classification result
+        await trackServerEvent("document_classified", userId, {
+          documentId,
+          documentType: classificationResult.documentType,
+          confidence: classificationResult.confidence,
+          reasoning: classificationResult.reasoning,
+          traceId
+        });
+        
+        // Update extraction job with full classification result
+        await supabase
+          .from('extraction_jobs')
+          .update({
+            extraction_options: {
+              includeConfidence,
+              includePositions,
+              useSegmentation,
+              segmentationThreshold,
+              maxPagesPerSegment,
+              skipClassification,
+              classificationResult: classificationResult // Store the whole object
+            }
+          })
+          .eq('id', extractionJob.id);
+          
+        console.log(`Document classified as: ${classificationResult.documentType} (Confidence: ${classificationResult.confidence})`);
+      } catch (error) {
+        // Classification failed, but proceed with extraction using default 'other' type
+        console.error("Document classification failed:", error);
+        classificationResult.reasoning = error instanceof Error ? error.message : "Unknown classification error";
+        documentType = "other";
+      }
+    }
+
+    // STEP 2: Prepare extraction prompt based on classification and user input
+    const userPromptText = extractionPrompt || "";
+    
+    // Now assignments to finalPrompt are valid
+    if (!skipClassification && userPromptText.length === 0) {
+      finalPrompt = getDefaultPromptForType(documentType);
+    } else if (!skipClassification) {
+      finalPrompt = enhancePromptWithClassification(userPromptText, documentType);
+    } else {
+      finalPrompt = userPromptText || "Extract all relevant information from this document.";
+    }
+    
+    // Apply standard prompt enhancements (JSON formatting, confidence, positions)
+    const enhancedPrompt = enhancePrompt(finalPrompt, includeConfidence, includePositions);
     
     // Prepare system instructions
     const contextualSystemInstructions = `${SYSTEM_INSTRUCTIONS}\nAnalyze the following document and extract the requested information.`;
@@ -400,28 +559,6 @@ export async function extractDocumentDataAction(
       }
     } else {
       // Standard (non-segmented) document processing path
-      
-      // Download document file
-      // @ts-ignore - Potential storage path property issue
-      const { data: fileData, error: fileError } = await supabase.storage
-        .from('documents')
-        .download(document.storage_path);
-        
-      if (fileError || !fileData) {
-        // Update job status to failed
-        await supabase
-          .from('extraction_jobs')
-          .update({
-            status: "failed",
-            error_message: `Failed to download document: ${fileError?.message || "Unknown error"}`
-          })
-          .eq('id', extractionJob.id);
-          
-        return {
-          isSuccess: false,
-          message: `Failed to download document: ${fileError?.message || "Unknown error"}`
-        };
-      }
       
       // Process the entire document as a single segment
       extractedData = await processDocumentSegment(
@@ -657,16 +794,11 @@ export async function extractTextAction(
   try {
     // Authentication check
     const userId = await getCurrentUser();
-    if (!userId) {
-      return { isSuccess: false, message: "User not authenticated" };
-    }
     
-    // Generate trace ID for tracking
-    const traceId = randomUUID();
-    
-    // Retrieve document
+    // Download and extract text from document
     const supabase = await createServerClient();
-    // @ts-ignore - Potential schema mismatch
+    
+    // Get document details
     const { data: document, error: docError } = await supabase
       .from('documents')
       .select('*')
@@ -681,123 +813,22 @@ export async function extractTextAction(
       };
     }
     
-    // Get User Subscription Data & Tier
-    const subscriptionResult = await getUserSubscriptionDataKVAction();
-    if (!subscriptionResult.isSuccess) {
-      return {
-        isSuccess: false,
-        message: "Failed to retrieve user subscription data"
-      };
-    }
-    
-    // Determine tier based on subscription status and planId
-    let tier: SubscriptionTier = "starter";
-    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
-      tier = subscriptionResult.data.planId as SubscriptionTier;
-    }
-    tier = validateTier(tier);
-    
-    // Get document file
-    // @ts-ignore - Potential storage path property issue
-    const { data: fileData, error: fileError } = await supabase.storage
-      .from('documents')
-      .download(document.storage_path);
-      
-    if (fileError || !fileData) {
-      return {
-        isSuccess: false,
-        message: `Failed to download document: ${fileError?.message || "Unknown error"}`
-      };
-    }
-    
-    // Prepare for AI processing
-    const arrayBuffer = await fileData.arrayBuffer();
-    const fileBase64 = Buffer.from(arrayBuffer).toString('base64');
-    
-    // Text-specific prompt
-    const textPrompt = extractionPrompt || "Extract all text content from this document.";
-    
-    try {
-      // Get base model
-      const baseModel = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
-      
-      // Wrap with PostHog tracing
-      // @ts-ignore - Type incompatibility between AI SDK and PostHog wrapper
-      const observableModel = withTracing(
-        baseModel as any,
-        phClient,
-        {
-          posthogDistinctId: userId,
-          posthogTraceId: traceId,
-          posthogProperties: {
-            documentId: documentId,
-            actionName: "extractTextAction",
-            promptUsed: textPrompt,
-            tier: tier,
-            // @ts-ignore - MIME type property might not exist
-            mimeType: document.mime_type || 'application/octet-stream'
-          }
-        }
-      );
-      
-      // Generate text with wrapped model
-      // @ts-ignore - Type compatibility issue with PostHog wrapper
-      const textResult = await generateText({
-        model: observableModel,
-        messages: [
-          {
-            role: "user",
-            content: [
-              // @ts-ignore - MIME type property might not exist
-              { type: "text", text: `${textPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type || 'application/octet-stream'}` },
-              // @ts-ignore - MIME type property might not exist
-              { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: document.mime_type || 'application/octet-stream' }
-            ]
-          }
-        ]
-      });
-      
-      // Update usage
-      await incrementPagesProcessedAction(userId, 1);
-      
-      // Track success (in addition to PostHog automatic tracing)
-      await trackServerEvent("text_extraction_completed", userId, {
-        documentId,
-        traceId,
-        tier
-      });
-      
-      // Return extracted text
-      return {
-        isSuccess: true,
-        message: "Text extraction completed successfully",
-        data: { text: textResult.text }
-      };
-      
-    } catch (aiError: unknown) {
-      // Error is automatically captured by PostHog tracing
-      const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
-      console.error("AI text extraction error:", errorMessage);
-      
-      // Track error event (in addition to automatic tracing from PostHog)
-      await trackServerEvent("text_extraction_failed", userId, {
-        documentId,
-        error: errorMessage,
-        traceId,
-        tier
-      });
-      
-      return {
-        isSuccess: false,
-        message: `AI text extraction failed: ${errorMessage}`
-      };
-    }
-    
+    // We bypass the AI extraction and just extract raw text
+    return extractDocumentDataAction({
+      documentId,
+      extractionPrompt: extractionPrompt || "Extract all text content from this document.",
+      includeConfidence: false,
+      includePositions: false,
+      useSegmentation: true,
+      segmentationThreshold: 10,
+      maxPagesPerSegment: 10,
+      skipClassification: true // Skip classification for simple text extraction
+    });
   } catch (error) {
-    console.error("Text extraction error:", error);
+    console.error("Error in extractTextAction:", error);
     return {
       isSuccess: false,
-      message: `Text extraction failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      message: error instanceof Error ? error.message : "Unknown error extracting text"
     };
   }
 }
@@ -813,12 +844,13 @@ export async function extractInvoiceDataAction(
 ): Promise<ActionState<any>> {
   return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || "Extract all invoice information including vendor details, invoice number, date, amount, line items, and payment terms.",
+    extractionPrompt: extractionPrompt || "Extract all invoice information including invoice number, date, total amount, vendor details, and line items.",
     includeConfidence: true,
     includePositions: false,
     useSegmentation: true,
     segmentationThreshold: 10,
-    maxPagesPerSegment: 10
+    maxPagesPerSegment: 10,
+    skipClassification: false // We want to use classification for invoice extraction
   });
 }
 
@@ -833,12 +865,13 @@ export async function extractResumeDataAction(
 ): Promise<ActionState<any>> {
   return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || "Extract all resume information including personal details, education, work experience, skills, and certifications.",
+    extractionPrompt: extractionPrompt || "Extract all resume information including personal details, work experience, education, and skills.",
     includeConfidence: true,
     includePositions: false,
     useSegmentation: true,
     segmentationThreshold: 10,
-    maxPagesPerSegment: 10
+    maxPagesPerSegment: 10,
+    skipClassification: false
   });
 }
 
@@ -853,12 +886,13 @@ export async function extractReceiptDataAction(
 ): Promise<ActionState<any>> {
   return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || "Extract all receipt information including store name, date, time, items purchased, prices, subtotal, tax, and total amount.",
+    extractionPrompt: extractionPrompt || "Extract all receipt information including merchant name, date, items purchased, and total amount.",
     includeConfidence: true,
     includePositions: false,
     useSegmentation: true,
     segmentationThreshold: 10,
-    maxPagesPerSegment: 10
+    maxPagesPerSegment: 10,
+    skipClassification: false
   });
 }
 
@@ -878,6 +912,7 @@ export async function extractFormDataAction(
     includePositions: true,
     useSegmentation: true,
     segmentationThreshold: 10,
-    maxPagesPerSegment: 10
+    maxPagesPerSegment: 10,
+    skipClassification: false
   });
 }

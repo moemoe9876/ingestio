@@ -36,15 +36,6 @@ const nextConfig = {
   // This is required to support PostHog trailing slash API requests
   skipTrailingSlashRedirect: true,
   
-  // Turbopack configuration
-  experimental: {
-    turbo: {
-      resolveAlias: {
-        canvas: './empty-module.ts',
-      },
-    },
-  },
-  
   turbopack: {
     // Default extensions to resolve with Turbopack
     resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.json', '.css'],
@@ -61,6 +52,7 @@ const nextConfig = {
     // Optional: Add resolve aliases for cleaner imports
     resolveAlias: {
       // Example: '@/*': './src/*'
+      canvas: './empty-module.ts',
     }
   }
 };
