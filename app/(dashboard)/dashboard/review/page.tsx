@@ -9,12 +9,13 @@ import { DataVisualizer } from "@/components/utilities/DataVisualizer";
 import DocumentViewer from "@/components/utilities/DocumentViewer";
 import { ResizablePanels } from "@/components/utilities/ResizablePanels";
 import { AlertCircle, Edit, FileText, Loader2, MessageSquare, RotateCcw, Save } from "lucide-react";
+import * as React from "react";
 import { useEffect, useState } from "react";
 
 interface PageProps {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 interface FieldData {
@@ -121,7 +122,7 @@ const updateNestedExtractedData = (
 };
 
 export default function ReviewPage({ params }: PageProps) {
-  const { id } = params;
+  const { id } = React.use(params);
   const documentId = id;
   const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);

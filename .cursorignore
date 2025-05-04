@@ -40,5 +40,5 @@ scripts/*.sql
 # 7) Planning docs / notes (if you don’t need them in your AI context)
 docs/
 todo/
-
+memory-bank/
 

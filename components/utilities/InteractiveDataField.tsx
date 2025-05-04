@@ -1,13 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { PositionData } from "@/types/ui/highlighting";
 import { Check, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-
-interface PositionData {
-  page_number: number;
-  bounding_box: [number, number, number, number];
-}
 
 interface FieldData {
   value: string | number;

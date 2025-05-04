@@ -5,9 +5,10 @@ import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
 import { getPostHogServerClient, trackServerEvent } from "@/lib/analytics/server";
 import { getCurrentUser } from "@/lib/auth-utils";
+import { mergeSegmentResults, segmentDocument, shouldSegmentDocument } from "@/lib/preprocessing/document-segmentation";
 import { checkRateLimit, createRateLimiter, isBatchSizeAllowed, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
-import { enhancePrompt, filterExtractedData, getDefaultPrompt, parseRequestedFields, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
+import { enhancePrompt, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";
 import { withTracing } from '@posthog/ai'; // Import PostHog AI wrapper
 import { generateObject, generateText } from "ai";
@@ -119,7 +120,10 @@ const extractDocumentSchema = z.object({
   documentId: z.string().uuid(),
   extractionPrompt: z.string().min(0).max(1000).optional(),
   includeConfidence: z.boolean().optional().default(true),
-  includePositions: z.boolean().optional().default(true)
+  includePositions: z.boolean().optional().default(true),
+  useSegmentation: z.boolean().optional().default(true), // New option to enable/disable segmentation
+  segmentationThreshold: z.number().optional().default(10), // Page threshold to trigger segmentation
+  maxPagesPerSegment: z.number().optional().default(10), // Maximum pages per segment
 });
 
 /**
@@ -223,8 +227,14 @@ export async function extractDocumentDataAction(
       };
     }
     
-    // Use the parsed input but apply our defaults
-    const { documentId, extractionPrompt } = parsedInput.data;
+    // Use the parsed input with our defaults
+    const { 
+      documentId, 
+      extractionPrompt,
+      useSegmentation,
+      segmentationThreshold,
+      maxPagesPerSegment
+    } = parsedInput.data;
     const includeConfidence = true;  // Always include confidence
     const includePositions = true;   // Always include positions
     
@@ -300,6 +310,9 @@ export async function extractDocumentDataAction(
         extraction_options: {
           includeConfidence,
           includePositions,
+          useSegmentation,
+          segmentationThreshold,
+          maxPagesPerSegment
         }
       })
       .select()
@@ -311,34 +324,8 @@ export async function extractDocumentDataAction(
         message: `Failed to create extraction job: ${jobError?.message || "Unknown error"}`
       };
     }
-    
-    // Download document file
-    // @ts-ignore - Potential storage path property issue
-    const { data: fileData, error: fileError } = await supabase.storage
-      .from('documents')
-      .download(document.storage_path);
-      
-    if (fileError || !fileData) {
-      // Update job status to failed
-      await supabase
-        .from('extraction_jobs')
-        .update({
-          status: "failed",
-          error_message: `Failed to download document: ${fileError?.message || "Unknown error"}`
-        })
-        .eq('id', extractionJob.id);
-        
-      return {
-        isSuccess: false,
-        message: `Failed to download document: ${fileError?.message || "Unknown error"}`
-      };
-    }
-    
-    // Prepare for AI processing
-    const arrayBuffer = await fileData.arrayBuffer();
-    const fileBase64 = Buffer.from(arrayBuffer).toString('base64');
-    
-    // Prepare prompt
+
+    // Prepare user prompt
     const userPromptText = extractionPrompt || "Extract all relevant information from this document.";
     const enhancedPrompt = enhancePrompt(
       userPromptText, 
@@ -346,240 +333,317 @@ export async function extractDocumentDataAction(
       includePositions
     );
     
-    // Parse requested fields from prompt
-    const requestedFields = parseRequestedFields(userPromptText);
-    
     // Prepare system instructions
     const contextualSystemInstructions = `${SYSTEM_INSTRUCTIONS}\nAnalyze the following document and extract the requested information.`;
     
-    // Call Vertex API with PostHog LLM tracing
-    try {
-      // Get base model
-      const baseModel = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
+    // Check if we should segment the document based on page count
+    const shouldSegment = useSegmentation && shouldSegmentDocument(actualPageCount, segmentationThreshold);
+    
+    let extractedData: any;
+    
+    if (shouldSegment) {
+      // Document segmentation path
+      console.log(`Segmenting document ${documentId} with ${actualPageCount} pages`);
       
-      // Wrap with PostHog tracing
-      // @ts-ignore - Type incompatibility between AI SDK and PostHog wrapper
-      const observableModel = withTracing(
-        baseModel as any,
-        phClient,
-        {
-          posthogDistinctId: userId,
-          posthogTraceId: traceId,
-          posthogProperties: {
-            documentId: documentId,
-            actionName: "extractDocumentDataAction",
-            promptUsed: enhancedPrompt,
-            extractionJobId: extractionJob.id,
-            tier: tier,
-            requestedFields: (requestedFields || []).join(', ') || 'all',
-            includeConfidence,
-            includePositions,
-            // @ts-ignore - MIME type property might not exist
-            mimeType: document.mime_type || 'application/octet-stream'
-          }
-        }
-      );
-      
-      let extractedData: any;
-      
-      try {
-        // @ts-ignore - Type compatibility issue between AI SDK versions and PostHog wrapper
-        const result = await generateObject({
-          model: observableModel,
-          schema: z.record(z.any()),
-          messages: [
-            {
-              role: "system",
-              content: contextualSystemInstructions
-            },
-            {
-              role: "user",
-              content: [
-                // @ts-ignore - MIME type property might not exist
-                { type: "text", text: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type || 'application/octet-stream'}` },
-                // @ts-ignore - MIME type property might not exist
-                { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: document.mime_type || 'application/octet-stream' }
-              ]
-            }
-          ]
-        });
-        
-        // Process results
-        const rawExtractedData = result.object;
-        extractedData = filterExtractedData(rawExtractedData, requestedFields);
-        
-      } catch (structuredError) {
-        // Handle specific error types and fall back to text generation if needed
-        const errorMessage = structuredError instanceof Error ? structuredError.message : String(structuredError);
-        
-        // Check for permission errors
-        if (errorMessage.includes("Permission") && errorMessage.includes("denied")) {
-          console.error("Vertex AI permission error:", errorMessage);
-          
-          // Update job with error
-          await supabase
-            .from('extraction_jobs')
-            .update({
-              status: "failed",
-              error_message: `Vertex AI permission error: ${errorMessage}. Please check service account permissions.`
-            })
-            .eq('id', extractionJob.id);
-            
-          throw new Error(`Vertex AI permission error: ${errorMessage}. Please ensure the service account has 'roles/aiplatform.user' role.`);
-        }
-        
-        // Fall back to text generation with PostHog tracing
-        console.warn("Structured generation failed, falling back to text generation:", structuredError);
-        
-        // @ts-ignore - Type compatibility issue with PostHog wrapper
-        const textResult = await generateText({
-          model: observableModel,
-          messages: [
-            {
-              role: "system",
-              content: contextualSystemInstructions
-            },
-            {
-              role: "user",
-              content: [
-                // @ts-ignore - MIME type property might not exist
-                { type: "text", text: `${enhancedPrompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${document.mime_type || 'application/octet-stream'}` },
-                // @ts-ignore - MIME type property might not exist
-                { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: document.mime_type || 'application/octet-stream' }
-              ]
-            }
-          ]
-        });
-        
-        // Try to parse JSON from the text response
-        try {
-          const cleanedResponse = textResult.text
-            .replace(/^```json\s*/, '')
-            .replace(/^```\s*/, '')
-            .replace(/```\s*$/, '')
-            .trim();
-            
-          const rawData = JSON.parse(cleanedResponse);
-          extractedData = filterExtractedData(rawData, requestedFields);
-        } catch (parseError) {
-          extractedData = { raw_text: textResult.text };
-        }
-      }
-      
-      // Save extraction data and update job status
-      // @ts-ignore - Table structure might differ
-      const { data: extractedDataRecord, error: extractionDataError } = await supabase
-        .from('extracted_data')
-        .insert({
-          extraction_job_id: extractionJob.id,
-          document_id: documentId,
-          user_id: userId,
-          data: extractedData,
-        })
-        .select()
-        .single();
-      
-      if (extractionDataError) {
-        throw new Error(`Failed to save extracted data: ${extractionDataError.message}`);
-      }
-      
-      // Update job status
-      const { data: updatedJob, error: updateError } = await supabase
-        .from('extraction_jobs')
-        .update({
-          status: "completed",
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', extractionJob.id)
-        .select()
-        .single();
-      
-      if (updateError) {
-        console.error("Failed to update extraction job:", updateError);
-      }
-      
-      // Update document status
-      await supabase
-        .from('documents')
-        .update({
-          status: "completed",
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', documentId);
-
-      // Update usage *only after success* and use the *actual page count*,
-      // *unless* invoked by the batch processor (which handles its own increments)
-      if (!invokedByBatchProcessor) {
-        await incrementPagesProcessedAction(userId, actualPageCount);
-      }
-
-      // Track success event (in addition to automatic tracing from PostHog)
-      await trackServerEvent("extraction_completed", userId, {
-        documentId,
-        extractionJobId: extractionJob.id,
-        tier,
-        traceId,
-        pageCount: actualPageCount // Use the correct page count here too
+      // 1. Segment the document into smaller chunks
+      const segments = await segmentDocument(documentId, actualPageCount, {
+        maxPagesPerSegment: maxPagesPerSegment,
+        useLogicalBreaks: false, // Default to simple page-based segmentation for now
       });
-
-      // Revalidate paths
-      revalidatePath(`/dashboard/documents/${documentId}`);
-      revalidatePath("/dashboard/documents");
-      revalidatePath("/dashboard/metrics");
       
-      return {
-        isSuccess: true,
-        message: "Document extraction completed successfully",
-        data: extractedData
-      };
+      // 2. Process each segment sequentially (could be parallelized in future)
+      const segmentResults: any[] = [];
       
-    } catch (aiError: unknown) {
-      // Handle AI extraction error - PostHog tracing already captures errors
-      const errorMessage = aiError instanceof Error ? aiError.message : String(aiError);
-      console.error("AI extraction error:", errorMessage);
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        console.log(`Processing segment ${i + 1}/${segments.length}: pages ${segment.startPage}-${segment.endPage}`);
+        
+        // Download only the relevant segment of the document file
+        // Note: This is a simplified approach - in a full implementation, we would extract specific pages
+        // @ts-ignore - Potential storage path property issue
+        const { data: fileData, error: fileError } = await supabase.storage
+          .from('documents')
+          .download(document.storage_path);
+          
+        if (fileError || !fileData) {
+          // Log error but continue with other segments if possible
+          console.error(`Failed to download segment ${i + 1}: ${fileError?.message || "Unknown error"}`);
+          continue;
+        }
+        
+        // Prepare segment-specific prompt with page range information
+        const segmentPrompt = `${enhancedPrompt}\n\nFocus on extracting information from pages ${segment.startPage} to ${segment.endPage} of the document.`;
+        
+        // Process this segment
+        const segmentResult = await processDocumentSegment(
+          userId,
+          fileData,
+          segmentPrompt,
+          contextualSystemInstructions,
+          document.mime_type || 'application/octet-stream',
+          traceId,
+          tier,
+          documentId,
+          extractionJob.id
+        );
+        
+        if (segmentResult) {
+          segmentResults.push(segmentResult);
+        }
+      }
       
-      // Update job status
-      if (extractionJob) {
+      // 3. Merge results from all segments
+      if (segmentResults.length > 0) {
+        extractedData = mergeSegmentResults(segmentResults);
+      } else {
+        throw new Error("All segments failed to process");
+      }
+    } else {
+      // Standard (non-segmented) document processing path
+      
+      // Download document file
+      // @ts-ignore - Potential storage path property issue
+      const { data: fileData, error: fileError } = await supabase.storage
+        .from('documents')
+        .download(document.storage_path);
+        
+      if (fileError || !fileData) {
+        // Update job status to failed
         await supabase
           .from('extraction_jobs')
           .update({
             status: "failed",
-            error_message: `AI extraction failed: ${errorMessage}`
+            error_message: `Failed to download document: ${fileError?.message || "Unknown error"}`
           })
           .eq('id', extractionJob.id);
+          
+        return {
+          isSuccess: false,
+          message: `Failed to download document: ${fileError?.message || "Unknown error"}`
+        };
       }
-        
-      // Track error event (in addition to automatic tracing from PostHog)
-      await trackServerEvent("extraction_failed", userId, {
-        documentId,
-        extractionJobId: extractionJob?.id,
-        error: errorMessage,
-        traceId,
-        tier
-      });
       
-      return {
-        isSuccess: false,
-        message: `AI extraction failed: ${errorMessage}`
-      };
-    }
-  } catch (error) {
-    // Generic error handling
-    try {
-      const userId = await getCurrentUser();
-      await trackServerEvent("extraction_error", userId, {
-        documentId: input.documentId,
-        error: error instanceof Error ? error.message : "Unknown error"
-      });
-    } catch (trackError) {
-      console.error("Failed to track error event:", trackError);
+      // Process the entire document as a single segment
+      extractedData = await processDocumentSegment(
+        userId,
+        fileData,
+        enhancedPrompt,
+        contextualSystemInstructions,
+        document.mime_type || 'application/octet-stream',
+        traceId,
+        tier,
+        documentId,
+        extractionJob.id
+      );
+      
+      if (!extractedData) {
+        throw new Error("Document processing failed");
+      }
     }
     
-    console.error("Document extraction error:", error);
+    // Save extraction data and update job status
+    // @ts-ignore - Table structure might differ
+    const { data: extractedDataRecord, error: extractionDataError } = await supabase
+      .from('extracted_data')
+      .insert({
+        extraction_job_id: extractionJob.id,
+        document_id: documentId,
+        user_id: userId,
+        data: extractedData,
+      })
+      .select()
+      .single();
+    
+    if (extractionDataError) {
+      throw new Error(`Failed to save extracted data: ${extractionDataError.message}`);
+    }
+    
+    // Update job status
+    const { data: updatedJob, error: updateError } = await supabase
+      .from('extraction_jobs')
+      .update({
+        status: "completed",
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', extractionJob.id)
+      .select()
+      .single();
+    
+    if (updateError) {
+      console.error("Failed to update extraction job:", updateError);
+    }
+    
+    // Update document status
+    await supabase
+      .from('documents')
+      .update({
+        status: "completed",
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', documentId);
+
+    // Update usage *only after success* and use the *actual page count*,
+    // *unless* invoked by the batch processor (which handles its own increments)
+    if (!invokedByBatchProcessor) {
+      await incrementPagesProcessedAction(userId, actualPageCount);
+    }
+
+    // Track success event (in addition to automatic tracing from PostHog)
+    await trackServerEvent("extraction_completed", userId, {
+      documentId,
+      tier,
+      pageCount: actualPageCount,
+      segmented: shouldSegment,
+      traceId
+    });
+
+    // Revalidate paths
+    revalidatePath(`/dashboard/documents/${documentId}`);
+    revalidatePath("/dashboard/documents");
+    revalidatePath("/dashboard/metrics");
+
+    // Return the extracted data
+    return {
+      isSuccess: true,
+      message: "Document extraction completed successfully",
+      data: extractedData,
+    };
+  } catch (error) {
+    console.error("Error in extractDocumentDataAction:", error);
+    
+    // Return a friendly error message to the client
     return {
       isSuccess: false,
-      message: `Document extraction failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      message: error instanceof Error ? error.message : "An unexpected error occurred during extraction"
     };
+  }
+}
+
+/**
+ * Helper function to process a document segment with the AI model
+ * 
+ * @param userId - User ID for tracking
+ * @param fileData - Blob of the document data
+ * @param prompt - Enhanced prompt for extraction
+ * @param systemInstructions - System instructions for the AI
+ * @param mimeType - Document MIME type
+ * @param traceId - Trace ID for PostHog tracking
+ * @param tier - User subscription tier
+ * @param documentId - Document ID
+ * @param extractionJobId - Extraction job ID
+ * @returns The extracted data or null if failed
+ */
+async function processDocumentSegment(
+  userId: string,
+  fileData: Blob,
+  prompt: string,
+  systemInstructions: string,
+  mimeType: string,
+  traceId: string,
+  tier: SubscriptionTier,
+  documentId: string,
+  extractionJobId: string
+): Promise<any | null> {
+  try {
+    // Prepare for AI processing
+    const arrayBuffer = await fileData.arrayBuffer();
+    const fileBase64 = Buffer.from(arrayBuffer).toString('base64');
+    
+    // Get base model
+    const baseModel = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH);
+    
+    // Wrap with PostHog tracing
+    // @ts-ignore - Type incompatibility between AI SDK and PostHog wrapper
+    const observableModel = withTracing(
+      baseModel as any,
+      phClient,
+      {
+        posthogDistinctId: userId,
+        posthogTraceId: traceId,
+        posthogProperties: {
+          documentId: documentId,
+          actionName: "processDocumentSegment",
+          promptUsed: prompt,
+          extractionJobId: extractionJobId,
+          tier: tier,
+          mimeType: mimeType
+        }
+      }
+    );
+    
+    let segmentData: any;
+    
+    try {
+      // @ts-ignore - Type compatibility issue between AI SDK versions and PostHog wrapper
+      const result = await generateObject({
+        model: observableModel,
+        messages: [
+          {
+            role: "system",
+            content: systemInstructions
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `${prompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${mimeType}` },
+              { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: mimeType }
+            ]
+          }
+        ],
+        schema: z.record(z.any())
+      });
+      
+      // Process results
+      segmentData = result.object;
+    } catch (structuredError) {
+      // Handle specific error types and fall back to text generation if needed
+      const errorMessage = structuredError instanceof Error ? structuredError.message : String(structuredError);
+      
+      // Check for permission errors
+      if (errorMessage.includes('permission') || errorMessage.includes('access denied')) {
+        throw new Error(`AI model access denied: ${errorMessage}`);
+      }
+      
+      // Fall back to text generation with PostHog tracing
+      console.warn("Structured generation failed, falling back to text generation:", structuredError);
+      
+      // @ts-ignore - Type compatibility issue with PostHog wrapper
+      const textResult = await generateText({
+        model: observableModel,
+        messages: [
+          {
+            role: "system",
+            content: systemInstructions
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: `${prompt}\n\nThe document is provided as a base64 encoded file with MIME type: ${mimeType}` },
+              { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: mimeType }
+            ]
+          }
+        ]
+      });
+      
+      // Try to parse JSON from the text response
+      try {
+        const cleanedResponse = textResult.text
+          .replace(/^```json\s*/, '')
+          .replace(/^```\s*/, '')
+          .replace(/```\s*$/, '')
+          .trim();
+          
+        const rawData = JSON.parse(cleanedResponse);
+        segmentData = rawData;
+      } catch (parseError) {
+        segmentData = { raw_text: textResult.text };
+      }
+    }
+    
+    return segmentData;
+  } catch (error) {
+    console.error("Error processing document segment:", error);
+    return null;
   }
 }
 
@@ -747,12 +811,14 @@ export async function extractInvoiceDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
-  // Use the generic extraction with invoice-specific settings
-  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
+  return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || getDefaultPrompt("invoice"),
+    extractionPrompt: extractionPrompt || "Extract all invoice information including vendor details, invoice number, date, amount, line items, and payment terms.",
     includeConfidence: true,
     includePositions: false,
+    useSegmentation: true,
+    segmentationThreshold: 10,
+    maxPagesPerSegment: 10
   });
 }
 
@@ -765,12 +831,14 @@ export async function extractResumeDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
-  // Use the generic extraction with resume-specific settings
-  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
+  return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || getDefaultPrompt("resume"),
+    extractionPrompt: extractionPrompt || "Extract all resume information including personal details, education, work experience, skills, and certifications.",
     includeConfidence: true,
     includePositions: false,
+    useSegmentation: true,
+    segmentationThreshold: 10,
+    maxPagesPerSegment: 10
   });
 }
 
@@ -783,12 +851,14 @@ export async function extractReceiptDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
-  // Use the generic extraction with receipt-specific settings
-  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
+  return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || getDefaultPrompt("receipt"),
+    extractionPrompt: extractionPrompt || "Extract all receipt information including store name, date, time, items purchased, prices, subtotal, tax, and total amount.",
     includeConfidence: true,
     includePositions: false,
+    useSegmentation: true,
+    segmentationThreshold: 10,
+    maxPagesPerSegment: 10
   });
 }
 
@@ -801,11 +871,13 @@ export async function extractFormDataAction(
   documentId: string,
   extractionPrompt?: string
 ): Promise<ActionState<any>> {
-  // Use the generic extraction with form-specific settings
-  return extractDocumentDataAction({ // invokedByBatchProcessor defaults to false
+  return extractDocumentDataAction({
     documentId,
-    extractionPrompt: extractionPrompt || getDefaultPrompt("form"),
+    extractionPrompt: extractionPrompt || "Extract all form fields and their values, including any checkbox or radio button selections.",
     includeConfidence: true,
-    includePositions: true, // Include positions for form fields
+    includePositions: true,
+    useSegmentation: true,
+    segmentationThreshold: 10,
+    maxPagesPerSegment: 10
   });
 }

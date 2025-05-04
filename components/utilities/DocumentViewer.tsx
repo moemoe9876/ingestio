@@ -1,22 +1,23 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import PdfViewerUrl from "./PdfViewerUrl";
-import { ZoomIn, ZoomOut, MoveHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { HighlightRect } from "@/types/ui/highlighting"; // Import shared types
+import { MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import PdfViewerUrl from "./PdfViewerUrl";
 
-interface HighlightRect {
-  pageNumber: number;
-  boundingBox: [number, number, number, number]; // [x1, y1, x2, y2] as percentages
-  color?: string;
-  id: string;
-}
+// Remove local HighlightRect definition
+// interface HighlightRect {
+//   pageNumber: number;
+//   boundingBox: [number, number, number, number]; // [x1, y1, x2, y2] as percentages
+//   color?: string;
+//   id: string;
+// }
 
 interface DocumentViewerProps {
   url: string;
-  highlights?: HighlightRect[];
-  onPositionClick?: (pageNumber: number, position: [number, number]) => void;
+  highlights?: HighlightRect[]; // Use imported HighlightRect
+  onPositionClick?: (pageNumber: number, position: [number, number]) => void; // Note: This position seems to be pixel-based, not BoundingBox
 }
 
 export default function DocumentViewer({ 

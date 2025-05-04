@@ -4,41 +4,30 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { HighlightRect, PositionData } from "@/types/ui/highlighting";
 import { ChevronDown, ChevronRight, Download, Search, SlidersHorizontal, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { InteractiveDataField } from "./InteractiveDataField";
 
 // Types
-interface PositionData {
-  page_number: number;
-  bounding_box: [number, number, number, number];
-}
-
 interface FieldData {
   value: string | number;
   confidence: number;
   position?: PositionData;
-}
-
-interface HighlightRect {
-  pageNumber: number;
-  boundingBox: [number, number, number, number];
-  color?: string;
-  id: string;
 }
 
 interface DataVisualizerProps {

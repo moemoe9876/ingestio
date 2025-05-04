@@ -1,390 +1,680 @@
 {
-    "nodes": [
-      {
-        "name": "IngestIO Application",
-        "observations": [
-          "Root of the project.",
-          "Next.js application using App Router.",
-          "Focuses on AI-powered document data extraction."
-        ]
-      },
-      {
-        "name": "Authentication (Clerk)",
-        "observations": [
-          "Handles user sign-up and login via Clerk components (`app/(auth)/...`).",
-          "Provides authentication context and helpers (`lib/auth-utils.ts`).",
-          "Syncs user data (creation, updates, deletion) to Supabase `users` and `profiles` tables via webhook (`app/api/webhooks/clerk/route.ts`).",
-          "Uses Clerk JWT template for Supabase RLS integration.",
-          "User profile management largely handled by Clerk's `<UserProfile>` component (`app/(dashboard)/dashboard/settings/page.tsx`)."
-        ]
-      },
-      {
-        "name": "Dashboard UI",
-        "observations": [
-          "Main application interface for authenticated users (`app/(dashboard)/...`).",
-          "Uses a consistent layout with a collapsible sidebar (`AppSidebar`) and header (`SiteHeader`).",
-          "Includes pages for Dashboard Overview, Document Upload, History, Metrics, Settings (incl. Billing), Review, and Batch Processing (planned).",
-          "Leverages Shadcn UI components (`components/ui`).",
-          "Specific dashboard CSS is defined (`app/(dashboard)/dashboard.css`).",
-          "Uses `ResizablePanels` component for layout adjustments (e.g., Review page)."
-        ]
-      },
-      {
-        "name": "Document Management",
-        "observations": [
-          "Handles file uploads (PDF, images) via `FileUpload` component and `uploadDocumentAction`.",
-          "Stores document metadata in the `documents` table (schema: `db/schema/documents-schema.ts`).",
-          "Stores actual files in Supabase Storage (`lib/supabase/storage-utils.ts`).",
-          "Includes actions for fetching documents (`fetchUserDocumentsAction`, `fetchDocumentForReviewAction`) and deletion (`deleteDocumentAction`).",
-          "Document status tracking (`uploaded`, `processing`, `completed`, `failed`).",
-          "Accurate server-side page counting identified as a critical need (`todo/page-count.md`).",
-          "Current page counting likely increments usage incorrectly (once on upload, once on extraction completion)."
-        ]
-      },
-      {
-        "name": "Storage (Supabase)",
-        "observations": [
-          "Uses Supabase Storage for storing uploaded documents (`documents` bucket) and potentially exports (`exports` bucket).",
-          "Storage utilities defined in `lib/supabase/storage-utils.ts` (currently using admin client, potentially needs review against RLS).",
-          "RLS policies defined for storage buckets (`__tests__/rls/storage-rls-policies.sql`) based on user ID path prefix.",
-          "Storage RLS tests exist (`__tests__/rls/storage.test.ts`)."
-        ]
-      },
-      {
-        "name": "AI Extraction",
-        "observations": [
-          "Core feature for extracting structured data.",
-          "Uses Google Vertex AI, specifically Gemini models (`VERTEX_MODELS.GEMINI_2_0_FLASH`).",
-          "Vertex AI client configuration in `lib/ai/vertex-client.ts` handling credentials.",
-          "Server actions handle extraction logic (`actions/ai/extraction-actions.ts`).",
-          "Supports different extraction types (text, invoice, resume, form) via dedicated actions.",
-          "Utilizes prompts defined in `prompts/extraction.ts`, including dynamic enhancement.",
-          "Handles base64 encoded file content for AI processing.",
-          "Includes schema generation capabilities (`actions/ai/schema.ts`, `prompts/schemaGen.ts`).",
-          "Results stored in `extracted_data` table.",
-          "Job status tracked in `extraction_jobs` table.",
-          "Test scripts for Vertex AI connectivity exist (`scripts/test-vertex*.js`)."
-        ]
-      },
-      {
-        "name": "Batch Processing",
-        "observations": [
-          "Planned feature for processing multiple documents simultaneously.",
-          "Detailed implementation plan exists (`todo/section-8.md`).",
-          "Requires new database tables (`extraction_batches`) and updates to `documents` and `extraction_jobs`.",
-          "Involves UI (`app/(dashboard)/dashboard/batch-upload`), server actions (`actions/batch/batch-extraction-actions.ts`), and background processing (likely via Vercel Cron targeting `/api/batch-processor`).",
-          "Feature access is tier-limited (Plus/Growth) with different batch size limits."
-        ]
-      },
-      {
-        "name": "Database (Supabase/PostgreSQL)",
-        "observations": [
-          "Uses Supabase PostgreSQL as the primary database.",
-          "Schema managed by Drizzle ORM (`db/schema/*`, `drizzle.config.ts`).",
-          "Migrations handled by Drizzle Kit (`db/migrations/*`).",
-          "Key tables: `users`, `profiles`, `documents`, `user_usage`, `extraction_batches`, `extraction_jobs`, `extracted_data`, `exports`.",
-          "Extensive Row-Level Security (RLS) policies implemented and tested (`__tests__/rls/*`, `db/migrations/*_rls.sql`).",
-          "RLS policies primarily use `auth.jwt()->>'sub'` to match against `user_id` (TEXT type).",
-          "RLS fixes for UUID mismatch and corrections applied (`db/migrations/fix/*`)."
-        ]
-      },
-      {
-        "name": "Payments (Stripe)",
-        "observations": [
-          "Handles user subscriptions and billing.",
-          "Integrates with Stripe via API keys stored in environment variables.",
-          "Uses Stripe Checkout for new subscriptions (`lib/stripe/checkout.ts`, `actions/stripe/checkout-actions.ts`).",
-          "Uses Stripe Billing Portal for subscription management.",
-          "Implements webhooks (`app/api/stripe/webhooks/route.ts`, `lib/stripe/webhooks.ts`, `actions/stripe/webhook-actions.ts`) to sync subscription status changes.",
-          "Webhook processing updates `profiles` (membership) and potentially `user_usage` (limits).",
-          "Adopts 'Sane Stripe' pattern using Redis KV store as source of truth for subscription status (`lib/stripe/sync.ts`, `types/stripe-kv-types.ts`).",
-          "Plan details configured in `lib/config/subscription-plans.ts`.",
-          "Dedicated success page (`app/stripe/success/page.tsx`) triggers eager sync.",
-          "Ongoing task to refine integration and implement usage reset (`todo/stripe-gemini.md`)."
-        ]
-      },
-      {
-        "name": "Rate Limiting",
-        "observations": [
-          "Protects against API abuse and enforces usage tiers.",
-          "Uses Upstash Redis (`lib/redis/client.ts`) for state management.",
-          "Implements tier-based limits (RPM, pages/month, batch size) defined in `lib/rate-limiting/limiter.ts`.",
-          "Checks are performed within server actions (`actions/ai/*`, `actions/batch/*`, `actions/db/documents.ts`) using `checkRateLimit` and `checkUserQuotaAction`.",
-          "`user_usage` table tracks monthly page limits/usage (`actions/db/user-usage-actions.ts`)."
-        ]
-      },
-      {
-        "name": "UI Components",
-        "observations": [
-          "Extensive use of Shadcn UI library (`components/ui/*`).",
-          "Uses MagicUI components (`components/magicui/*`) like `BorderBeam`, `DotPattern`, `AnimatedGradientText`.",
-          "Custom utility components exist for core features: `FileUpload`, `DocumentViewer`, `PdfViewerUrl`, `DataVisualizer`, `InteractiveDataField`, `AppSidebar`, `SiteHeader`, `UserNav`, `MetricCard`, `ProgressMetric`, `ResizablePanels`.",
-          "Theme Provider (`theme-provider.tsx`) and Mode Toggle (`mode-toggle.tsx`) handle light/dark modes."
-        ]
-      },
-      {
-        "name": "Analytics (PostHog)",
-        "observations": [
-          "Integrates PostHog for analytics and LLM observability.",
-          "Client-side provider (`posthog-provider.tsx`) and user identification (`posthog-user-identity.tsx`) setup in root layout.",
-          "Server-side event tracking utilities (`lib/analytics/server.ts`).",
-          "Uses `@posthog/ai` `withTracing` wrapper for LLM observability in extraction actions (`actions/ai/extraction-actions.ts`)."
-        ]
-      },
-      {
-        "name": "Testing",
-        "observations": [
-          "Uses Vitest as the testing framework (`vitest.config.ts`).",
-          "Includes tests for server actions (`__tests__/ai/*`, `__tests__/db/*`, `__tests__/profile-actions.test.ts`, `__tests__/document-actions.test.ts`).",
-          "Comprehensive RLS tests (`__tests__/rls/*`) covering various tables (`documents`, `profiles`, `users`, `user_usage`) and Supabase Storage.",
-          "RLS tests utilize helper functions and setup scripts (`__tests__/rls/utils.ts`, `__tests__/rls/setup-test-data.js`).",
-          "Tests for rate limiting (`__tests__/rate-limiting.test.ts`) and auth utils (`__tests__/auth-utils.test.ts`)."
-        ]
-      },
-      {
-        "name": "Configuration & Build",
-        "observations": [
-          "Next.js configuration (`next.config.mjs`) includes image remote patterns and PostHog rewrites.",
-          "Tailwind CSS configuration (`tailwind.config.ts`) defines theme colors, including sidebar variants.",
-          "Drizzle ORM configuration (`drizzle.config.ts`).",
-          "Code formatting and linting managed by Biome (`biome.json`) and ESLint (`.eslintrc.json`).",
-          "Prettier configuration exists (`prettier.config.cjs`) but Biome might be primary.",
-          "TypeScript configuration (`tsconfig.json`).",
-          "Uses pnpm for package management (`package.json`).",
-          "`.npmrc` configured for hoisting and non-strict peers."
-        ]
-      },
-      {
-        "name": "Ignored Files",
-        "observations": [
-          "`.gitignore` excludes standard files like `node_modules`, `.next`, `.env*`, `service-account.json`.",
-          "`.cursorignore` excludes `node_modules`, build outputs, Supabase temp files, assets, scripts, and planning docs like `todo/`."
-        ]
-      },
-      {
-        "name": "TODOs & Issues",
-        "observations": [
-          "Page counting bug: Single-page documents increment usage by 2. Plan exists to fix by implementing server-side counting and adjusting increment logic (`todo/page-count.md`).",
-          "Stripe integration needs refinement: Implement 'Sane Stripe' approach fully, including KV store usage, eager sync, simplified webhooks, and reliable usage reset on renewal (`todo/stripe-gemini.md`, `todo/stripe.md`).",
-          "Batch Processing: Detailed plan outlined for implementation (`todo/section-8.md`).",
-          "UI Improvements: Specific plans exist for enhancing Dashboard, Metrics, and Settings pages (`todo/dashboard-ui.md`, `todo/metrics-ui.md`, `todo/settings-ui.md`).",
-          "Security review findings and performance optimization suggestions documented (`todo/security.md`).",
-          "General pending tasks listed in `todo/todo.md` (e.g., multi-page PDF viewer fix, history page cache)."
-        ]
-      },
-      {
-        "name": "Memory Bank",
-        "observations": [
-          "Contains context documents defining the project brief, product context, tech stack, system patterns, implementation plan, progress, and tasks.",
-          "Provides high-level guidance and context for development.",
-          "Located in `memory-bank/`."
-        ]
-      }
-    ],
-    "edges": [
-      {
-        "source": "IngestIO Application",
-        "target": "Dashboard UI",
-        "name": "contains",
-        "description": "The main application interface."
-      },
-      {
-        "source": "IngestIO Application",
-        "target": "Authentication (Clerk)",
-        "name": "uses",
-        "description": "Handles user authentication and management."
-      },
-      {
-        "source": "IngestIO Application",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "uses",
-        "description": "Stores all application data."
-      },
-      {
-        "source": "IngestIO Application",
-        "target": "Storage (Supabase)",
-        "name": "uses",
-        "description": "Stores user-uploaded files."
-      },
-      {
-        "source": "IngestIO Application",
-        "target": "AI Extraction",
-        "name": "features",
-        "description": "Core functionality for data extraction."
-      },
-      {
-        "source": "IngestIO Application",
-        "target": "Payments (Stripe)",
-        "name": "uses",
-        "description": "Handles subscriptions and billing."
-      },
-      {
-        "source": "IngestIO Application",
-        "target": "Rate Limiting",
-        "name": "implements",
-        "description": "Controls usage and prevents abuse."
-      },
-      {
-        "source": "Dashboard UI",
-        "target": "Authentication (Clerk)",
-        "name": "relies on",
-        "description": "Requires authentication for access, displays user info."
-      },
-      {
-        "source": "Dashboard UI",
-        "target": "Document Management",
-        "name": "interacts with",
-        "description": "Provides UI for uploading, viewing history, and reviewing documents."
-      },
-      {
-        "source": "Dashboard UI",
-        "target": "AI Extraction",
-        "name": "displays",
-        "description": "Shows extracted data on the review page."
-      },
-      {
-        "source": "Dashboard UI",
-        "target": "Batch Processing",
-        "name": "provides UI for",
-        "description": "Planned UI for submitting and monitoring batch jobs."
-      },
-      {
-        "source": "Dashboard UI",
-        "target": "UI Components",
-        "name": "built with",
-        "description": "Uses Shadcn, MagicUI, and custom components for the interface."
-      },
-      {
-        "source": "Dashboard UI",
-        "target": "Payments (Stripe)",
-        "name": "provides access to",
-        "description": "Settings page allows managing subscriptions via Stripe portal/checkout."
-      },
-      {
-        "source": "Document Management",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "stores/retrieves",
-        "description": "Manages document metadata in the 'documents' table."
-      },
-      {
-        "source": "Document Management",
-        "target": "Storage (Supabase)",
-        "name": "uses",
-        "description": "Uploads/deletes files from Supabase Storage."
-      },
-      {
-        "source": "Document Management",
-        "target": "Rate Limiting",
-        "name": "checks",
-        "description": "Upload action checks user quota."
-      },
-      {
-        "source": "AI Extraction",
-        "target": "Document Management",
-        "name": "processes",
-        "description": "Retrieves documents for extraction."
-      },
-      {
-        "source": "AI Extraction",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "stores/updates",
-        "description": "Saves extracted data, manages job status."
-      },
-      {
-        "source": "AI Extraction",
-        "target": "Rate Limiting",
-        "name": "limited by",
-        "description": "Extraction actions are rate-limited and check quotas."
-      },
-      {
-        "source": "AI Extraction",
-        "target": "Analytics (PostHog)",
-        "name": "reports to",
-        "description": "Uses PostHog LLM observability via withTracing."
-      },
-      {
-        "source": "Batch Processing",
-        "target": "AI Extraction",
-        "name": "orchestrates",
-        "description": "Triggers individual document extractions as part of a batch."
-      },
-      {
-        "source": "Batch Processing",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "uses",
-        "description": "Relies on `extraction_batches` and `extraction_jobs` tables."
-      },
-      {
-        "source": "Authentication (Clerk)",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "syncs user data to",
-        "description": "Webhook creates/updates/deletes records in 'users' and 'profiles' tables."
-      },
-      {
-        "source": "Payments (Stripe)",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "updates",
-        "description": "Webhooks update user membership in 'profiles' and page limits in 'user_usage'."
-      },
-      {
-        "source": "Payments (Stripe)",
-        "target": "Rate Limiting",
-        "name": "shares resource",
-        "description": "Both use Redis (Stripe for KV store, Rate Limiting for counters)."
-      },
-      {
-        "source": "Rate Limiting",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "reads",
-        "description": "Checks user's subscription tier in 'profiles' to apply correct limits."
-      },
-      {
-        "source": "Testing",
-        "target": "Database (Supabase/PostgreSQL)",
-        "name": "validates",
-        "description": "RLS tests ensure database security policies are effective."
-      },
-      {
-        "source": "Testing",
-        "target": "Storage (Supabase)",
-        "name": "validates",
-        "description": "RLS tests ensure storage security policies are effective."
-      },
-      {
-        "source": "Testing",
-        "target": "AI Extraction",
-        "name": "covers",
-        "description": "Tests exist for AI extraction actions."
-      },
-      {
-        "source": "Testing",
-        "target": "Rate Limiting",
-        "name": "covers",
-        "description": "Tests exist for rate limiting logic."
-      },
-      {
-        "source": "TODOs & Issues",
-        "target": "Document Management",
-        "name": "identifies issue with",
-        "description": "Page counting needs correction."
-      },
-      {
-        "source": "TODOs & Issues",
-        "target": "Payments (Stripe)",
-        "name": "plans refinement for",
-        "description": "'Sane Stripe' implementation and usage reset."
-      },
-      {
-        "source": "TODOs & Issues",
-        "target": "Batch Processing",
-        "name": "details implementation of",
-        "description": "Outlines steps for building the batch feature."
-      },
-      {
-        "source": "TODOs & Issues",
-        "target": "Dashboard UI",
-        "name": "identifies need for",
-        "description": "UI improvements planned for several dashboard pages."
-      }
-    ]
-  }
+  "nodes": [
+    {
+      "id": "IngestIO",
+      "name": "IngestIO Application",
+      "observations": [
+        "AI-powered document data extraction system.",
+        "Enables users to extract structured information from documents.",
+        "Uses Google Vertex AI (Gemini) models.",
+        "Allows document upload, AI extraction, review, and export.",
+        "Built with Next.js 15 (App Router), React 19, Tailwind CSS, shadcn/ui.",
+        "Backend uses Next.js server actions.",
+        "Database is PostgreSQL with Drizzle ORM (via Supabase).",
+        "Authentication handled by Clerk.",
+        "Payments handled by Stripe.",
+        "Analytics handled by PostHog.",
+        "Rate limiting uses Upstash Redis.",
+        "Deployed on Vercel."
+      ]
+    },
+    {
+      "id": "Architecture",
+      "name": "System Architecture",
+      "observations": [
+        "Modern Next.js architecture using App Router, Server Components, Server Actions.",
+        "Layered architecture integrating external services.",
+        "Organized into Frontend, Backend, Database, AI Integration, Authentication, Payments, Analytics, Rate Limiting layers.",
+        "Codebase structure includes /app, /components, /lib, /actions, /db.",
+        "Core service layers: UI Layer, Server Actions Layer, External Integration Layer.",
+        "Key architectural patterns: Server Components/Actions, Database Access Pattern (Drizzle), File Storage Pattern (Supabase Storage)."
+      ]
+    },
+    {
+      "id": "DataFlow",
+      "name": "Data Flow",
+      "observations": [
+        "Multi-stage pipeline: Upload -> Storage -> DB Record -> AI Extraction -> DB Storage -> Review -> Update/Export.",
+        "Document Upload Flow involves auth, rate limiting, quota check, storage, DB insert, usage tracking.",
+        "AI Extraction Flow involves job creation, retrieval, AI processing (Vertex AI), result storage, state updates.",
+        "Document Review Flow allows verification, correction, confirmation, secure access.",
+        "User Usage/Quota Management tracks pages processed, enforces limits, resets usage.",
+        "Batch Processing Flow handles multiple documents, checks batch size limits, manages concurrency.",
+        "Database Update Flow tracks state changes across tables.",
+        "Includes error handling and retry mechanisms.",
+        "Subscription data influences flow via rate limits/quotas."
+      ]
+    },
+    {
+      "id": "DatabaseSchema",
+      "name": "Database Schema",
+      "observations": [
+        "Uses PostgreSQL hosted on Supabase.",
+        "Managed with Drizzle ORM.",
+        "Core entities: User data, Documents, Extraction data, Usage tracking.",
+        "Key tables: users, profiles, user_usage, documents, extraction_jobs, extraction_batches, extracted_data, exports.",
+        "Users table synchronized from Clerk.",
+        "Profiles table extends users with subscription info (membership, Stripe IDs).",
+        "Documents table stores metadata and storage path.",
+        "Extraction Jobs table tracks AI tasks.",
+        "Extracted Data table stores structured results (JSONB).",
+        "Extraction Batches table manages groups of jobs.",
+        "Exports table tracks export operations.",
+        "User Usage table tracks page processing against billing periods.",
+        "Uses PostgreSQL Enums for constrained values (membership, status, format).",
+        "Implements Row-Level Security (RLS) policies via Supabase.",
+        "Uses JSONB for flexible data storage (extracted_data, options, metadata).",
+        "Includes created_at and updated_at timestamps with auto-update triggers."
+      ]
+    },
+    {
+      "id": "DocumentProcessing",
+      "name": "Document Processing",
+      "observations": [
+        "Core functionality: Upload, AI Extract, Review.",
+        "Integrates with User Management, Subscriptions, Storage, AI Services, Analytics.",
+        "Workflow involves multiple steps with status tracking.",
+        "Includes usage tracking and limit enforcement based on subscription tier."
+      ]
+    },
+    {
+      "id": "DocumentUpload",
+      "name": "Document Upload",
+      "observations": [
+        "Handles file selection, validation (type, size), storage, and DB record creation.",
+        "Initiated via UI component (`FileUpload.tsx`).",
+        "Server-side logic in `uploadDocumentAction` (`actions/db/documents.ts`).",
+        "Includes auth, rate limiting, and quota checks.",
+        "Stores files in Supabase Storage (`documents/{userId}/{timestamp}_{sanitizedFileName}`).",
+        "Creates a record in the `documents` table.",
+        "Updates user page consumption in `user_usage` table.",
+        "UI provides drag-and-drop, previews, and extraction instruction input.",
+        "Supports PDF, PNG, JPEG.",
+        "Implements security measures (auth, path validation, sanitization)."
+      ]
+    },
+    {
+      "id": "AIExtraction",
+      "name": "AI Extraction",
+      "observations": [
+        "Core intelligent component using Google Vertex AI (Gemini models, specifically gemini-2.0-flash-001).",
+        "Transforms unstructured documents into structured data.",
+        "Server-side logic in `actions/ai/extraction-actions.ts` and `lib/ai/vertex-client.ts`.",
+        "Handles authentication with Vertex AI (priority-based: env var, service account, ADC).",
+        "Workflow: Auth/Validate -> Rate/Quota Check -> Retrieve Doc -> Create Job -> Prep Prompt -> AI Process -> Store Result -> Track Usage.",
+        "Uses `generateObject()` from Vercel AI SDK for structured output.",
+        "Implements fallback to text extraction if structured extraction fails.",
+        "Includes specialized actions for invoices, resumes, receipts, forms.",
+        "Supports schema generation (Zod, TypeScript Interface, JSON Schema) via `actions/ai/schema.ts`.",
+        "Integrates rate limiting and quota checks based on subscription tier.",
+        "Tracks events using PostHog analytics.",
+        "Includes predefined Zod schemas for common document types."
+      ]
+    },
+    {
+      "id": "DocumentReview",
+      "name": "Document Review",
+      "observations": [
+        "Allows users to review, verify, and edit AI-extracted data.",
+        "Interface located at `app/(dashboard)/dashboard/review/[id]/page.tsx`.",
+        "Uses a split-panel layout: Data Visualizer (left) and Document Viewer (right).",
+        "DataVisualizer component (`components/utilities/DataVisualizer.tsx`) displays data (Tree/JSON view), confidence scores, allows editing.",
+        "Document Viewer shows original PDF/image with highlighting.",
+        "Features interactive data editing (`InteractiveDataField.tsx`).",
+        "Visualizes confidence scores with color-coding and filtering.",
+        "Provides document-data position mapping (hover/click highlighting).",
+        "Allows data export (JSON, CSV).",
+        "Fetches data using `fetchDocumentForReviewAction`.",
+        "Saves changes using `updateExtractedDataAction`."
+      ]
+    },
+    {
+      "id": "BatchProcessing",
+      "name": "Batch Processing",
+      "observations": [
+        "Allows submitting multiple documents for extraction in one operation.",
+        "Functionality restricted by subscription tier (Starter limited, Plus/Growth enabled).",
+        "Server-side logic in `actions/batch/batch-extraction-actions.ts`.",
+        "Workflow: Validate Request -> Check Tier/Size Limit -> Check Quota -> Rate Limit -> Create Batch Job -> Queue Individual Docs -> Track Status.",
+        "Leverages the core AI Extraction system for individual documents.",
+        "Provides status tracking via `checkBatchStatusAction`.",
+        "Implements tier-specific batch size limits and rate limiting."
+      ]
+    },
+    {
+      "id": "UserManagement",
+      "name": "User Management",
+      "observations": [
+        "Handles user identity, authentication, and profile data.",
+        "Uses Clerk for authentication.",
+        "User data stored in Supabase (`users` and `profiles` tables).",
+        "Synchronizes Clerk user data to Supabase via Webhooks (`app/api/webhooks/clerk/route.ts`).",
+        "Webhook handler processes `user.created`, `user.updated`, `user.deleted` events.",
+        "Uses Supabase JWT authentication via middleware (`lib/supabase/middleware.ts`).",
+        "Provides server actions (`actions/db/users-actions.ts`, `actions/db/profiles-actions.ts`) for CRUD operations.",
+        "Implements security measures: auth checks, self-only modification for public actions, webhook signature verification.",
+        "Tracks events (subscription changes, profile updates) via analytics."
+      ]
+    },
+    {
+      "id": "SubscriptionSystem",
+      "name": "Subscription System",
+      "observations": [
+        "Manages user subscription plans (Starter, Plus, Growth).",
+        "Processes payments via Stripe.",
+        "Enforces usage quotas.",
+        "Uses Redis KV store as the primary source of truth for subscription data.",
+        "Denormalizes subscription status to the `profiles` table in the database.",
+        "Plan definitions in `lib/config/subscription-plans.ts`.",
+        "Handles Stripe Checkout via `createCheckoutSessionAction` (`actions/stripe/checkout-actions.ts`).",
+        "Provides access to Stripe Billing Portal via `createBillingPortalSessionAction`.",
+        "Processes Stripe Webhooks (`app/api/stripe/webhooks/route.ts`, `actions/stripe/webhook-actions.ts`) to sync data.",
+        "Key webhook events: `checkout.session.completed`, `customer.subscription.*`, `invoice.paid`.",
+        "Resets usage quotas upon successful renewal (`invoice.paid`).",
+        "Integrates with middleware for route protection based on subscription tier."
+      ]
+    },
+    {
+      "id": "Analytics",
+      "name": "Analytics",
+      "observations": [
+        "Implemented using PostHog.",
+        "Includes server-side event tracking (`lib/analytics/server.ts`).",
+        "Provides `trackServerEvent` and `identifyServerUser` functions.",
+        "Features a Metrics Visualization dashboard (`app/(dashboard)/dashboard/metrics/page.tsx`).",
+        "Metrics dashboard displays KPIs, usage stats, distributions (status, type), errors.",
+        "Uses SWR for data fetching on the metrics page with auto-refresh.",
+        "Uses Recharts for chart visualizations (Area, Pie/Bar, Radial Bar).",
+        "Tracks document processing events (upload, extraction start/complete/fail, review).",
+        "Tracks user account events (registration, subscription change, quota exceeded).",
+        "Allows exporting metrics data as CSV.",
+        "Designed with privacy considerations (avoids tracking PII by default)."
+      ]
+    },
+    {
+      "id": "UserInterface",
+      "name": "User Interface (UI)",
+      "observations": [
+        "Built with Next.js App Router, React, Tailwind CSS, shadcn/ui.",
+        "Component-based architecture.",
+        "Uses distinct layouts: Marketing (`(marketing)`), Auth (`(auth)`), Dashboard (`(dashboard)`).",
+        "Core UI components built using Radix UI primitives and Tailwind.",
+        "Includes components for Dialogs, Forms, Navigation (Pagination), Data Viz (Calendar, Charts), Command Palette, Toggles.",
+        "Features a responsive Header component (`components/layout/header.tsx`) adapting to context (marketing/auth) and screen size.",
+        "Implements consistent patterns for Form Handling (React Hook Form), Dialogs, Pagination.",
+        "Supports Light/Dark themes via `next-themes`.",
+        "Emphasizes responsive design (mobile-first) and accessibility (ARIA, keyboard nav)."
+      ]
+    },
+    {
+      "id": "DashboardUI",
+      "name": "Dashboard UI",
+      "observations": [
+        "Central interface for authenticated users.",
+        "Provides access to Upload, Review, History, Settings, Metrics.",
+        "Uses Next.js App Router and Server Components.",
+        "Integrates with backend services via Server Actions.",
+        "Includes Metrics section with KPIs, usage tracking, visualizations.",
+        "Displays user's current subscription status and usage quota.",
+        "Implements loading states, error alerts, and empty states."
+      ]
+    },
+    {
+      "id": "DocumentHistoryUI",
+      "name": "Document History UI",
+      "observations": [
+        "Located at `app/(dashboard)/dashboard/history/page.tsx`.",
+        "Provides a view of uploaded/processed documents.",
+        "Features timeline view (grouped by time), recent documents grid, filtering (status, type), search.",
+        "Allows viewing document details (preview, extracted data) in a slide-in sheet.",
+        "Uses client-side rendering with server actions for data fetching (`fetchUserDocumentsAction`).",
+        "Manages state for filters, sorting, loading, dialogs.",
+        "Implements smart date formatting and visual status indicators.",
+        "Uses Framer Motion for animations."
+      ]
+    },
+    {
+      "id": "MarketingPagesUI",
+      "name": "Marketing Pages UI",
+      "observations": [
+        "Public-facing pages under the `(marketing)` route group.",
+        "Showcases features, pricing, testimonials.",
+        "Main landing page at `app/(marketing)/page.tsx` (Client Component).",
+        "Uses a specific Marketing Layout (`app/(marketing)/layout.tsx`).",
+        "Includes Hero, Features, How It Works sections.",
+        "Uses Framer Motion for animations and interactivity (scroll effects, parallax).",
+        "Integrates with Clerk for auth status display and actions.",
+        "Integrates with Stripe for plan selection/checkout.",
+        "Implements responsive design."
+      ]
+    },
+    {
+      "id": "ServerActions",
+      "name": "Server Actions",
+      "observations": [
+        "Primary mechanism for server-side logic execution from UI.",
+        "Located in the `/actions` directory, categorized by function (db, ai, stripe, batch).",
+        "Declared using `"use server"` directive.",
+        "Follow a consistent pattern: Auth check -> Input validation -> Rate/Quota check -> Logic -> Return `ActionState<T>`.",
+        "Return standardized `ActionState<T>` object ({ isSuccess, message, data?, error? }).",
+        "Use `getCurrentUser()` for authentication.",
+        "Integrate rate limiting (`checkRateLimit`) and quota checks (`checkUserQuotaAction`).",
+        "Tested using Vitest with mocks.",
+        "Best practices include auth, validation, consistent returns, error handling, revalidation (`revalidatePath`), security checks, analytics tracking."
+      ]
+    },
+    {
+      "id": "RateLimitingQuotas",
+      "name": "Rate Limiting and Quotas",
+      "observations": [
+        "Enforces usage limits based on subscription tiers (Starter, Plus, Growth).",
+        "Prevents abuse, ensures fair allocation, protects resources.",
+        "Limits include monthly page quota, API request rate limits, batch processing capabilities, data retention.",
+        "Rate limiting implemented using Upstash Redis.",
+        "Limits applied per user, based on tier and action type.",
+        "Quota management tracks monthly page processing via `user_usage` table.",
+        "Checks performed before operations (`checkRateLimit`, `checkUserQuotaAction`).",
+        "Usage incremented after successful operations (`incrementPagesProcessedAction`).",
+        "Quotas reset automatically at the start of new billing periods (via Stripe webhook).",
+        "Quota checks bypassed in development environment.",
+        "Tracks rate limit/quota exceeded events via analytics."
+      ]
+    },
+    {
+      "id": "Nextjs",
+      "name": "Next.js",
+      "observations": [
+        "Core framework for the application (Version 15).",
+        "Utilizes App Router, Server Components, Client Components, Server Actions.",
+        "Provides routing, rendering, and API capabilities."
+      ]
+    },
+    {
+      "id": "Supabase",
+      "name": "Supabase",
+      "observations": [
+        "Provides managed PostgreSQL database.",
+        "Provides file storage (Supabase Storage).",
+        "Integrates with Clerk for authentication context.",
+        "Supports Row-Level Security (RLS)."
+      ]
+    },
+    {
+      "id": "Clerk",
+      "name": "Clerk",
+      "observations": [
+        "Handles user authentication and identity management.",
+        "Provides UI components for sign-in/sign-up.",
+        "Synchronizes user data to Supabase via webhooks.",
+        "Provides JWTs used for Supabase authentication."
+      ]
+    },
+    {
+      "id": "Stripe",
+      "name": "Stripe",
+      "observations": [
+        "Handles payment processing for subscriptions.",
+        "Provides Checkout sessions and Customer Billing Portal.",
+        "Uses webhooks to notify the application of subscription events (creation, updates, payments)."
+      ]
+    },
+    {
+      "id": "VertexAI",
+      "name": "Google Vertex AI",
+      "observations": [
+        "Provides AI models (Gemini) for document data extraction.",
+        "Accessed via Vercel AI SDK and custom client (`lib/ai/vertex-client.ts`).",
+        "Supports multimodal document processing."
+      ]
+    },
+    {
+      "id": "PostHog",
+      "name": "PostHog",
+      "observations": [
+        "Used for analytics and event tracking.",
+        "Captures both client-side and server-side events.",
+        "Provides data for the Metrics Dashboard."
+      ]
+    },
+    {
+      "id": "UpstashRedis",
+      "name": "Upstash Redis",
+      "observations": [
+        "Used for rate limiting implementation.",
+        "Used as the primary KV store for subscription data (Sane Stripe approach)."
+      ]
+    },
+    {
+      "id": "DrizzleORM",
+      "name": "Drizzle ORM",
+      "observations": [
+        "TypeScript ORM used for database interactions.",
+        "Provides type-safe database access.",
+        "Used to define the database schema."
+      ]
+    },
+    {
+      "id": "TailwindCSS",
+      "name": "Tailwind CSS",
+      "observations": [
+        "Utility-first CSS framework used for styling the UI."
+      ]
+    },
+    {
+      "id": "ShadcnUI",
+      "name": "shadcn/ui",
+      "observations": [
+        "Collection of reusable UI components built using Radix UI and Tailwind CSS.",
+        "Forms the basis of the application's UI component system."
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "IngestIO",
+      "target": "Architecture",
+      "name": "has",
+      "description": "IngestIO is built upon the described System Architecture."
+    },
+    {
+      "source": "IngestIO",
+      "target": "Nextjs",
+      "name": "uses_framework",
+      "description": "IngestIO uses Next.js as its primary web framework."
+    },
+    {
+      "source": "IngestIO",
+      "target": "Supabase",
+      "name": "uses_service",
+      "description": "IngestIO uses Supabase for database and storage."
+    },
+    {
+      "source": "IngestIO",
+      "target": "Clerk",
+      "name": "uses_service",
+      "description": "IngestIO uses Clerk for authentication."
+    },
+    {
+      "source": "IngestIO",
+      "target": "Stripe",
+      "name": "uses_service",
+      "description": "IngestIO uses Stripe for payments."
+    },
+    {
+      "source": "IngestIO",
+      "target": "VertexAI",
+      "name": "uses_service",
+      "description": "IngestIO uses Google Vertex AI for AI capabilities."
+    },
+    {
+      "source": "IngestIO",
+      "target": "PostHog",
+      "name": "uses_service",
+      "description": "IngestIO uses PostHog for analytics."
+    },
+    {
+      "source": "IngestIO",
+      "target": "UpstashRedis",
+      "name": "uses_service",
+      "description": "IngestIO uses Upstash Redis for rate limiting and subscription caching."
+    },
+    {
+      "source": "Architecture",
+      "target": "ServerActions",
+      "name": "implements",
+      "description": "The architecture utilizes Server Actions for backend logic."
+    },
+    {
+      "source": "Architecture",
+      "target": "DatabaseSchema",
+      "name": "defines",
+      "description": "The architecture includes a specific Database Schema."
+    },
+    {
+      "source": "Architecture",
+      "target": "UserInterface",
+      "name": "includes",
+      "description": "The architecture defines the structure of the User Interface."
+    },
+    {
+      "source": "DataFlow",
+      "target": "DocumentUpload",
+      "name": "starts_with",
+      "description": "The main data flow begins with Document Upload."
+    },
+    {
+      "source": "DataFlow",
+      "target": "AIExtraction",
+      "name": "includes_step",
+      "description": "AI Extraction is a key step in the data flow."
+    },
+    {
+      "source": "DataFlow",
+      "target": "DocumentReview",
+      "name": "includes_step",
+      "description": "Document Review is a step in the data flow."
+    },
+    {
+      "source": "DataFlow",
+      "target": "DatabaseSchema",
+      "name": "updates",
+      "description": "Data flows through and updates various tables in the Database Schema."
+    },
+    {
+      "source": "DatabaseSchema",
+      "target": "Supabase",
+      "name": "hosted_on",
+      "description": "The PostgreSQL database schema is hosted on Supabase."
+    },
+    {
+      "source": "DatabaseSchema",
+      "target": "DrizzleORM",
+      "name": "managed_by",
+      "description": "The database schema and interactions are managed by Drizzle ORM."
+    },
+    {
+      "source": "DocumentProcessing",
+      "target": "DocumentUpload",
+      "name": "includes_phase",
+      "description": "Document Processing includes the Document Upload phase."
+    },
+    {
+      "source": "DocumentProcessing",
+      "target": "AIExtraction",
+      "name": "includes_phase",
+      "description": "Document Processing includes the AI Extraction phase."
+    },
+    {
+      "source": "DocumentProcessing",
+      "target": "DocumentReview",
+      "name": "includes_phase",
+      "description": "Document Processing includes the Document Review phase."
+    },
+    {
+      "source": "DocumentProcessing",
+      "target": "BatchProcessing",
+      "name": "supports",
+      "description": "Document Processing supports Batch Processing for multiple documents."
+    },
+    {
+      "source": "DocumentUpload",
+      "target": "Supabase",
+      "name": "stores_files_in",
+      "description": "Document Upload stores files in Supabase Storage."
+    },
+    {
+      "source": "DocumentUpload",
+      "target": "DatabaseSchema",
+      "name": "creates_record_in",
+      "description": "Document Upload creates records in the 'documents' table."
+    },
+    {
+      "source": "DocumentUpload",
+      "target": "ServerActions",
+      "name": "uses",
+      "description": "Document Upload functionality is implemented via Server Actions."
+    },
+    {
+      "source": "AIExtraction",
+      "target": "VertexAI",
+      "name": "uses_ai",
+      "description": "AI Extraction uses Google Vertex AI models."
+    },
+    {
+      "source": "AIExtraction",
+      "target": "DatabaseSchema",
+      "name": "stores_results_in",
+      "description": "AI Extraction stores results in 'extracted_data' and updates 'extraction_jobs' tables."
+    },
+    {
+      "source": "AIExtraction",
+      "target": "ServerActions",
+      "name": "uses",
+      "description": "AI Extraction functionality is implemented via Server Actions."
+    },
+    {
+      "source": "DocumentReview",
+      "target": "UserInterface",
+      "name": "is_part_of",
+      "description": "The Document Review interface is part of the overall User Interface."
+    },
+    {
+      "source": "DocumentReview",
+      "target": "DatabaseSchema",
+      "name": "reads_from",
+      "description": "Document Review reads extracted data from the database."
+    },
+    {
+      "source": "BatchProcessing",
+      "target": "AIExtraction",
+      "name": "orchestrates",
+      "description": "Batch Processing orchestrates multiple AI Extraction tasks."
+    },
+    {
+      "source": "BatchProcessing",
+      "target": "ServerActions",
+      "name": "uses",
+      "description": "Batch Processing functionality is implemented via Server Actions."
+    },
+    {
+      "source": "UserManagement",
+      "target": "Clerk",
+      "name": "integrates_with",
+      "description": "User Management integrates with Clerk for authentication."
+    },
+    {
+      "source": "UserManagement",
+      "target": "Supabase",
+      "name": "stores_data_in",
+      "description": "User Management stores synchronized user data in Supabase."
+    },
+    {
+      "source": "UserManagement",
+      "target": "DatabaseSchema",
+      "name": "updates",
+      "description": "User Management updates the 'users' and 'profiles' tables."
+    },
+    {
+      "source": "SubscriptionSystem",
+      "target": "Stripe",
+      "name": "integrates_with",
+      "description": "Subscription System integrates with Stripe for payments and billing."
+    },
+    {
+      "source": "SubscriptionSystem",
+      "target": "UpstashRedis",
+      "name": "uses_cache",
+      "description": "Subscription System uses Redis as a primary cache for subscription data."
+    },
+    {
+      "source": "SubscriptionSystem",
+      "target": "DatabaseSchema",
+      "name": "updates",
+      "description": "Subscription System updates the 'profiles' and 'user_usage' tables."
+    },
+    {
+      "source": "SubscriptionSystem",
+      "target": "RateLimitingQuotas",
+      "name": "defines",
+      "description": "Subscription tiers define the limits enforced by the Rate Limiting and Quotas system."
+    },
+    {
+      "source": "Analytics",
+      "target": "PostHog",
+      "name": "uses_tool",
+      "description": "Analytics uses PostHog for event tracking and analysis."
+    },
+    {
+      "source": "Analytics",
+      "target": "ServerActions",
+      "name": "triggered_by",
+      "description": "Analytics events are often triggered within Server Actions."
+    },
+    {
+      "source": "UserInterface",
+      "target": "ShadcnUI",
+      "name": "uses_library",
+      "description": "The UI uses shadcn/ui components."
+    },
+    {
+      "source": "UserInterface",
+      "target": "TailwindCSS",
+      "name": "uses_styling",
+      "description": "The UI is styled using Tailwind CSS."
+    },
+    {
+      "source": "UserInterface",
+      "target": "ServerActions",
+      "name": "calls",
+      "description": "UI components call Server Actions to perform backend operations."
+    },
+    {
+      "source": "DashboardUI",
+      "target": "Analytics",
+      "name": "displays",
+      "description": "The Dashboard UI displays metrics gathered by the Analytics system."
+    },
+    {
+      "source": "DocumentHistoryUI",
+      "target": "DatabaseSchema",
+      "name": "displays_data_from",
+      "description": "Document History UI displays data from the 'documents' table."
+    },
+    {
+      "source": "MarketingPagesUI",
+      "target": "Stripe",
+      "name": "integrates_with",
+      "description": "Marketing Pages integrate with Stripe for checkout initiation."
+    },
+    {
+      "source": "ServerActions",
+      "target": "DatabaseSchema",
+      "name": "interacts_with",
+      "description": "Server Actions perform CRUD operations on the Database Schema."
+    },
+    {
+      "source": "ServerActions",
+      "target": "AIExtraction",
+      "name": "triggers",
+      "description": "Server Actions trigger AI Extraction processes."
+    },
+    {
+      "source": "ServerActions",
+      "target": "RateLimitingQuotas",
+      "name": "enforces",
+      "description": "Server Actions check and enforce Rate Limiting and Quotas."
+    },
+    {
+      "source": "RateLimitingQuotas",
+      "target": "UpstashRedis",
+      "name": "uses_storage",
+      "description": "Rate Limiting uses Upstash Redis for storing limit counters."
+    },
+    {
+      "source": "RateLimitingQuotas",
+      "target": "DatabaseSchema",
+      "name": "uses_storage",
+      "description": "Quota management uses the 'user_usage' table in the Database Schema."
+    }
+  ]
+}
