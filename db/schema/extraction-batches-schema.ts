@@ -5,24 +5,24 @@ Defines the schema for extraction batches.
 */
 
 import {
-  integer,
-  pgEnum, // Import pgEnum
-  pgTable,
-  text,
-  timestamp,
-  uuid,
+    integer, // Import pgEnum
+    pgTable,
+    text,
+    timestamp,
+    uuid
 } from "drizzle-orm/pg-core";
+import { batchStatusEnum } from "./enums"; // Import from enums.ts
 import { profilesTable } from "./profiles-schema";
 
 // Define the enum
-export const batchStatusEnum = pgEnum("batch_status_enum", [
-  "pending_upload",
-  "queued",
-  "processing",
-  "completed",
-  "partially_completed",
-  "failed",
-]);
+// export const batchStatusEnum = pgEnum("batch_status_enum", [
+//   "pending_upload",
+//   "queued",
+//   "processing",
+//   "completed",
+//   "partially_completed",
+//   "failed",
+// ]);
 
 export const extractionBatchesTable = pgTable("extraction_batches", {
   id: uuid("id").defaultRandom().primaryKey(),

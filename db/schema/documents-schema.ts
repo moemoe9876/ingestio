@@ -5,11 +5,12 @@ Defines the schema for documents and related document status enum.
 */
 
 import { createUTCDate } from "@/lib/utils/date-utils";
-import { integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { documentStatusEnum } from "./enums"; // Import from enums.ts
 import { extractionBatchesTable } from "./extraction-batches-schema"; // Import batch schema
 import { profilesTable } from "./profiles-schema";
 
-export const documentStatusEnum = pgEnum("document_status", ["uploaded", "processing", "completed", "failed"]);
+// export const documentStatusEnum = pgEnum("document_status", ["uploaded", "processing", "completed", "failed"]);
 
 export const documentsTable = pgTable("documents", {
   id: uuid("id").defaultRandom().primaryKey(),
