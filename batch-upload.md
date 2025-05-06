@@ -90,61 +90,127 @@
 
 ---
 
-**Step 8.1: Implement Batch Upload UI (3-Step Wizard)**
+**(Revised) Step 8.1: Implement Batch Upload UI (3-Step Wizard - Based on v0 Mockup)**
 
-*   **Task**: Develop the multi-step frontend interface (Wizard) for batch uploads.
-*   **Goal**: Provide an intuitive, accessible, and informative UI based on research report best practices (Sec 2.1-2.6), guiding users through file selection, prompt configuration, and submission, while respecting tier limits derived from the KV store.
+*   **Task**: Develop the multi-step frontend interface (Wizard) for batch uploads, precisely following the design and flow demonstrated in the provided v0 UI mockup screenshots.
+*   **Goal**: Create an intuitive, accessible, and informative 3-step wizard that guides users through file selection, prompt configuration, and batch review/submission, while respecting tier limits derived from the KV store and providing clear feedback as per the v0 mockup.
 *   **Modules**:
-    *   **8.1.1: Create Batch Upload Page & Wizard Wrapper**:
-        *   **Action**: Set up `app/(dashboard)/dashboard/batch-upload/page.tsx` and `components/batch/BatchUploadWizard.tsx`. Implement tier-based access control using KV data.
-        *   **Files**: `app/(dashboard)/dashboard/batch-upload/page.tsx`, `components/batch/BatchUploadWizard.tsx` (New), `actions/stripe/sync-actions.ts`, `lib/config/subscription-plans.ts`.
-        *   **Instructions**:
-            1.  `BatchUploadWizard.tsx` (`"use client"`): Manage wizard step (`useState<'files' | 'prompts' | 'review'>`).
-            2.  `useEffect`: Fetch subscription data (`planId`, `status`) via `getUserSubscriptionDataKVAction`. Handle loading/error.
-            3.  Determine eligibility (`status` active/trialing, `planId` plus/growth). If ineligible, render "Upgrade Required" message.
-            4.  If eligible, store `planId` and `batchLimit` in state. Display `batchLimit` clearly.
-            5.  Render current step component. Add Next/Previous/Submit buttons.
-            6.  Implement basic state management (`useState`) for wizard data (`selectedFiles`, `promptStrategy`, `globalPrompt`, `perDocPrompts`).
-    *   **8.1.2: Implement Step 1: File Selection**:
-        *   **Action**: Integrate `BatchFileUpload` component. Handle file selection and validation feedback.
-        *   **Files**: `components/batch/BatchUploadWizard.tsx`, `components/utilities/BatchFileUpload.tsx`.
-        *   **Instructions**:
-            1.  Render `BatchFileUpload` in the 'files' step.
-            2.  Pass `batchLimit` as `maxFiles`. Configure `allowedMimeTypes` (PDF, JPG, PNG for MVP) and `maxFileSize` (e.g., 50MB from report).
-            3.  Use `onFilesChange` to update wizard's `selectedFiles` state.
-            4.  Display constraints clearly near the dropzone (Report Sec 2.5).
-            5.  Show immediate feedback for rejected files (Report Sec 2.5).
-            6.  Display selected files list with name, size, and a remove button (Report Sec 2.2). Add simple file type icons (Report Sec 2.4).
-            7.  Disable "Next" if no files selected.
-            8.  Ensure keyboard navigation and screen reader support (Report Sec 2.6).
-    *   **8.1.3: Implement Step 2: Prompt Configuration**:
-        *   **Action**: Allow selection of prompt strategy and input of prompts.
-        *   **Files**: `components/batch/BatchUploadWizard.tsx`.
-        *   **Instructions**:
-            1.  Add state: `promptStrategy` (default 'global'), `globalPrompt`, `perDocPrompts` (map `File.name` -> `prompt`).
-            2.  Use `RadioGroup` or similar for strategy selection.
-            3.  Conditionally render:
-                *   `Global`: Single `Textarea` bound to `globalPrompt`.
-                *   `Per-Document`: Map `selectedFiles`, rendering each filename with an associated `Textarea` bound to `perDocPrompts[file.name]`. Use a `ScrollArea` if the list is long.
-                *   `Auto-Detect`: Informational text: "IngestIO will automatically detect the document type and apply the best extraction settings."
-            4.  **UI Hint:** Add clear text explaining the behavior of each strategy.
-            5.  Validate inputs: Disable "Next" if 'global' strategy is chosen but `globalPrompt` is empty, or if 'per_document' is chosen and any file lacks a prompt.
-    *   **8.1.4: Implement Step 3: Review & Submit**:
-        *   **Action**: Show summary and handle form submission via Server Action.
-        *   **Files**: `components/batch/BatchUploadWizard.tsx`, `actions/batch/batchActions.ts`.
-        *   **Instructions**:
-            1.  Display summary: Number of files, selected strategy, prompt details.
-            2.  Add "Submit Batch" button. Use `useTransition` for `isSubmitting` state. Disable button when `isSubmitting`.
-            3.  `onSubmit` handler:
-                *   Create `FormData`. Append `files`, `promptStrategy`, `batchName` (optional).
-                *   Append `globalPrompt` if strategy is 'global'.
-                *   Append `JSON.stringify(perDocPrompts)` if strategy is 'per_document'.
-                *   Call `createBatchUploadAction(formData)` within `startTransition`.
-                *   Handle `ActionState` response: Show success/error `toast`. On success, redirect to `/dashboard/batches` (or detail page).
+
+    *   **8.1.1: Create Batch Upload Page & Wizard Wrapper Component**:
+        *   **Action**: Set up the main page at `app/(dashboard)/dashboard/batch-upload/page.tsx`. This page will render a new primary client component, `components/batch/BatchUploadWizard.tsx`, which will manage the state and rendering of the 3-step wizard. Implement tier-based access control.
+        *   **Files**:
+            *   `app/(dashboard)/dashboard/batch-upload/page.tsx` (New or modify existing)
+            *   `components/batch/BatchUploadWizard.tsx` (New Client Component)
+            *   `components/batch/WizardNav.tsx` (New or adapt from v0 `wizard-nav.tsx`)
+            *   `components/batch/PlanInfoBanner.tsx` (New or adapt from v0 `plan-info.tsx`)
+            *   (Uses `actions/stripe/sync-actions.ts`, `lib/config/subscription-plans.ts`)
+        *   **Instructions for `BatchUploadWizard.tsx` (`"use client"`)**:
+            1.  **State Management:**
+                *   `currentStep: number` (1, 2, or 3), initialized to 1.
+                *   `selectedFiles: File[]`, initialized to `[]`.
+                *   `fileRejections: { file: File, errors: { code: string, message: string }[] }[]`, initialized to `[]`.
+                *   `promptStrategy: "global" | "per_document" | "auto-detect"`, initialized to `"global"`.
+                *   `globalPrompt: string`, initialized to an empty string or a default placeholder.
+                *   `perDocPrompts: Record<string, string>`, initialized to `{}` (maps `file.name` to prompt string).
+                *   `batchName: string` (optional, consider adding an input for this in Step 1 or 3 if desired, for now, it's not in the mockup).
+                *   `userPlanId: PlanId | null`, `userTier: SubscriptionTier | null`, `batchFileLimit: number | null`.
+                *   `isLoadingSubscription: boolean`, initialized to `true`.
+                *   `subscriptionError: string | null`.
+                *   `isSubmitting: boolean` (for `useTransition`).
+            2.  **Layout Structure (within `BatchUploadWizard.tsx`):**
+                *   Main container div with `max-w-5xl`, `mx-auto`, `py-8 px-4`.
+                *   Page Title: "New Batch Upload".
+                *   Render `PlanInfoBanner.tsx` component, passing `userPlanId` and `batchFileLimit`.
+                *   Render `WizardNav.tsx` component, passing `currentStep`.
+                *   Conditionally render content for Step 1, 2, or 3 based on `currentStep`.
+                *   Implement navigation buttons ("Previous", "Next", "Submit Batch") at the bottom, with visibility and labels changing based on `currentStep`.
+            3.  **`useEffect` for Subscription Data & Access Control:**
+                *   Fetch subscription data (`planId`, `status`) via `getUserSubscriptionDataKVAction`. Update `userPlanId`, `userTier`, `batchFileLimit` (from `subscriptionPlans[tier].batchProcessingLimit`), `isLoadingSubscription`, and `subscriptionError` states.
+                *   If user is on 'starter' tier or subscription is not 'active'/'trialing', display an "Access Denied / Upgrade Required" message (e.g., using Shadcn `Alert` component with a link to billing settings) instead of the wizard steps.
+            4.  **Helper Functions:**
+                *   `handleNextStep()`, `handlePreviousStep()`.
+                *   `handleSubmitBatch()`: Prepares `FormData` and calls `createBatchUploadAction` using `startTransition`.
+
+    *   **8.1.2: Implement Step 1: File Selection UI & Logic**:
+        *   **Action**: Integrate or adapt the file upload functionality shown in the v0 mockup's `file-upload.tsx` into the 'Files' step of `BatchUploadWizard.tsx`.
+        *   **Files**: `components/batch/BatchUploadWizard.tsx`, `components/utilities/BatchFileUpload.tsx` (Adapt or use v0's `file-upload.tsx` logic).
+        *   **Instructions (within `BatchUploadWizard.tsx` - Files Step Content)**:
+            1.  **Dropzone & Button:**
+                *   Implement the drag & drop area styled as per the mockup (dashed border, centered text "Drag & drop files here or click to browse", "Upload your files to begin processing").
+                *   Include an "Upload Files" `Button` (black background, white text as in mockup).
+                *   Use `react-dropzone` for this functionality.
+            2.  **Constraint Display:** Below the dropzone, display: "Max files per batch: {batchFileLimit}", "Allowed types: PDF, JPG, PNG", "Max file size: 50MB". Use small text and bullet point icons as in the mockup.
+            3.  **File Handling Logic (from `react-dropzone` `onDrop` callback):**
+                *   Update `selectedFiles` state with accepted files, respecting `batchFileLimit`.
+                *   Update `fileRejections` state for rejected files, capturing error messages.
+            4.  **Selected Files List:**
+                *   Render a section titled "Selected Files ({validFileCount} valid)".
+                *   Map `selectedFiles` to display valid files:
+                    *   Use appropriate Lucide icons (`FileText` for PDF, `ImageIcon` for images).
+                    *   Display `file.name` and `formatFileSize(file.size)`.
+                    *   Add an "X" icon `Button` (ghost, small) to remove the file.
+                *   Map `fileRejections` to display rejected files:
+                    *   Style with a red background/text and `AlertCircleIcon`.
+                    *   Display file icon, name, size, and the specific error message.
+                    *   Add an "X" icon `Button`.
+            5.  **Navigation:** "Next: Configure Prompts" button, disabled if no valid files are selected.
+            6.  **Accessibility:** Ensure dropzone and file list are keyboard navigable and screen-reader friendly (Report Sec 2.6).
+
+    *   **8.1.3: Implement Step 2: Prompt Configuration UI & Logic**:
+        *   **Action**: Implement the UI for selecting prompt strategy and inputting prompts, as shown in the v0 mockup's `prompt-configuration.tsx`.
+        *   **Files**: `components/batch/BatchUploadWizard.tsx`, Shadcn `RadioGroup`, `Textarea`, `Label`, `ScrollArea`.
+        *   **Instructions (within `BatchUploadWizard.tsx` - Prompts Step Content)**:
+            1.  **Prompt Strategy Selection:**
+                *   Use Shadcn `RadioGroup` and `RadioGroupItem` for "Global Prompt," "Per-Document Prompt," and "Auto-Detect & Prompt."
+                *   Style with `Label` and descriptions as per the mockup.
+                *   Bind to `promptStrategy` state.
+            2.  **Conditional Prompt Inputs (within a `Card`-like container):**
+                *   **If `promptStrategy === 'global'`:**
+                    *   Section title: "Enter Global Extraction Prompt".
+                    *   Descriptive text: "This prompt will be applied to all documents in the batch."
+                    *   Shadcn `Textarea` bound to `globalPrompt` state.
+                *   **If `promptStrategy === 'per_document'`:**
+                    *   Section title: "Configure Individual Document Prompts".
+                    *   Descriptive text: "Customize extraction prompts for each document in your batch."
+                    *   Use `ScrollArea` for the list if it can be long.
+                    *   Map `selectedFiles` (valid ones). For each:
+                        *   Display file icon and `file.name`.
+                        *   Shadcn `Textarea` for its specific prompt, value from `perDocPrompts[file.name]`, `onChange` updates `perDocPrompts`.
+                        *   Style with subtle separators between file prompt entries.
+                *   **If `promptStrategy === 'auto_detect'`:**
+                    *   Section title: "Auto-Detect & Prompt".
+                    *   Descriptive text: "IngestIO will automatically detect the document type and apply the best extraction settings. No prompt needed here."
+                    *   Blue highlighted info box: "Our AI will analyze each document, identify its type, and extract relevant information automatically. This is ideal for mixed document batches." (Use Shadcn `Alert` with an `InfoCircledIcon`).
+            3.  **UI Hint:** Ensure descriptions for strategies are clear.
+            4.  **Validation:** "Next: Review Batch" button disabled if:
+                *   `promptStrategy === 'global'` and `globalPrompt` is empty.
+                *   `promptStrategy === 'per_document'` and any valid file lacks a non-empty prompt in `perDocPrompts`.
+
+    *   **8.1.4: Implement Step 3: Review & Submit UI & Logic**:
+        *   **Action**: Display a summary of the batch configuration and handle submission, as shown in the v0 mockup's `batch-review.tsx`.
+        *   **Files**: `components/batch/BatchUploadWizard.tsx`, `actions/batch/batchActions.ts`, Shadcn `Card`, `Collapsible`.
+        *   **Instructions (within `BatchUploadWizard.tsx` - Review Step Content)**:
+            1.  **Batch Summary Section (within a `Card` or styled div):**
+                *   Display "Files": Count of valid files, `getTotalSize()` (helper function to sum sizes and format).
+                *   Display "Strategy": Formatted `promptStrategy` label.
+                *   Display "Processing": "Standard", "Est. time: 2-3 minutes".
+            2.  **Prompt Details (Collapsible Section):**
+                *   Use Shadcn `Collapsible`, `CollapsibleTrigger` (with `ChevronUpIcon`/`ChevronDownIcon`), `CollapsibleContent`.
+                *   Trigger text: "Prompt Details".
+                *   Content:
+                    *   If `promptStrategy === 'global'`: "Global Prompt:", then the `globalPrompt` text.
+                    *   If `promptStrategy === 'per_document'`: "Per-Document Prompts:", then list each file (icon, name) and its prompt from `perDocPrompts`.
+                    *   If `promptStrategy === 'auto_detect'`: This section is omitted (as per mockup).
+            3.  **Files (Collapsible Section):**
+                *   Trigger text: "Files ({validFileCount})".
+                *   Content: List valid `selectedFiles` with icon, name, and size.
+            4.  **Informational Note:** Display message with `InfoCircledIcon`: "Once submitted, this batch will be processed according to your plan settings. You'll receive a notification when processing is complete."
+            5.  **Submit Button:** "Submit Batch" button, bound to `handleSubmitBatch` function. Disable if `isSubmitting`.
+
     *   **8.1.5: Update Sidebar Navigation**:
-        *   **Action**: Add link to `/dashboard/batch-upload`.
+        *   **Action**: Add a link to `/dashboard/batch-upload` in `components/utilities/app-sidebar.tsx`.
         *   **Files**: `components/utilities/app-sidebar.tsx`.
-        *   **Instructions**: Add `SidebarMenuItem` with `Layers` icon.
+        *   **Instructions**: Add a `SidebarMenuItem` with the `Layers` icon (or a more specific batch icon if available) linking to the new page. Ensure it's placed logically within the navigation structure.
 
 ---
 
@@ -232,23 +298,97 @@
 
 ---
 
-**Step 8.4: Implement Batch Status UI (MVP)**
+Okay, Engineer. Let's elevate Step 8.4 from an MVP to a polished, production-ready Batch Status UI suitable for a top-tier SaaS application like Ingestio.io. We'll incorporate best practices from the research report and leverage the capabilities of your Shadcn/ui component library and Framer Motion for a smooth, informative, and visually appealing experience.
 
-*   **Task**: Build basic UI for listing and viewing batch status.
-*   **Goal**: Provide users visibility into their submitted batches and overall progress.
+---
+
+**Step 8.4: Implement Polished Batch Status UI**
+
+*   **Task**: Build sophisticated frontend pages for users to comprehensively monitor their batch jobs, view detailed progress, access results, and manage batches.
+*   **Goal**: Provide a clear, intuitive, visually appealing, and informative interface for batch monitoring that aligns with modern SaaS standards and enhances user trust and productivity.
 *   **Modules**:
-    *   **8.4.1: Create Batch List Action & Page**:
-        *   **Action**: Define `fetchUserBatchesAction`. Implement `app/(dashboard)/dashboard/batches/page.tsx`.
-        *   **Files**: `actions/batch/batchActions.ts` (New), `app/(dashboard)/dashboard/batches/page.tsx` (New).
-        *   **Instructions**: Fetch batches. Display simple list/table: Name (or ID), Status Badge, Progress (e.g., "X / Y documents"), Submitted Date. Link to detail page. Handle loading/empty states. *Defer complex progress bar for MVP.*
-    *   **8.4.2: Create Batch Detail Action & Page**:
-        *   **Action**: Define `fetchBatchDetailsAction`. Implement `app/(dashboard)/dashboard/batches/[batchId]/page.tsx`.
-        *   **Files**: `actions/batch/batchActions.ts` (New), `app/(dashboard)/dashboard/batches/[batchId]/page.tsx` (New).
-        *   **Instructions**: Fetch batch and associated documents. Handle not found/denied. Pass data to client component.
+
+    *   **8.4.1: Create Batch List Action & Page (`/dashboard/batches`)**:
+        *   **Action**: Define `fetchUserBatchesAction` server action. Implement the main batch listing page UI.
+        *   **Files**: `actions/batch/batchActions.ts` (New Action), `app/(dashboard)/dashboard/batches/page.tsx` (New Page), `components/batch/BatchListClient.tsx` (New Client Component).
+        *   **Instructions**:
+            1.  **`fetchUserBatchesAction`**:
+                *   Accept parameters for pagination (`page`, `pageSize`), sorting (`sortBy`, `sortOrder`), and potentially filtering (`statusFilter`, `nameFilter`).
+                *   Authenticate user (`getCurrentUser`).
+                *   Query `extraction_batches` table using Drizzle, applying `WHERE eq(userId, ...)`, filtering, sorting (`orderBy`), and pagination (`limit`, `offset`).
+                *   Include a `count()` query to get the total number of batches matching the filters for pagination controls.
+                *   Return `ActionState<{ batches: SelectExtractionBatch[], totalCount: number }>`. Handle errors gracefully.
+            2.  **`page.tsx` (Server Component)**:
+                *   Fetch initial batch data (e.g., page 1, default sort) using `fetchUserBatchesAction`.
+                *   Pass initial data, total count, and initial query params to `BatchListClient`. Handle initial fetch errors.
+            3.  **`BatchListClient.tsx` (`"use client"`)**:
+                *   Manage state: `batches`, `isLoading`, `error`, `pagination` (`currentPage`, `totalPages`), `sorting`, `filters`.
+                *   Use `useSWR` or a similar hook (with `fetchUserBatchesAction` as the fetcher) for data fetching, enabling automatic revalidation/polling (e.g., `refreshInterval: 5000`) for status updates. Key the SWR hook with filters/sort/page state.
+                *   **UI Implementation**:
+                    *   Use `Card` or a similar container for the main list area.
+                    *   Implement filtering controls (e.g., `DropdownMenu` or `Select` for Status, `Input` with `Search` icon for Name). Use debouncing for the search input.
+                    *   Implement sorting controls (e.g., `DropdownMenu` attached to table headers).
+                    *   Display batches using `DataTable` (from Shadcn examples) or a custom responsive grid/list:
+                        *   **Columns/Fields:** Batch Name (or ID if unnamed), Status (use `Badge` with `getStatusColorClasses` and `getStatusIcon`), **Detailed Progress** (Display `X / Y documents` and a `Progress` bar calculating `(completed_count + failed_count) / document_count * 100`), **Total Pages**, Submitted Date (`formatRelativeTime`), Completed Date (if applicable).
+                        *   **Actions:** Include a "View Details" button/link (`Link href="/dashboard/batches/[batchId]"`) and potentially quick actions like "Delete" (with confirmation dialog) via a `DropdownMenu` (`MoreHorizontal` icon).
+                    *   Implement `Pagination` component based on `totalCount` and `pageSize`.
+                    *   Use `Skeleton` loaders during initial load and refresh.
+                    *   Display clear error messages using `Alert` if fetching fails.
+                    *   Show an informative empty state (e.g., "No batches found matching your criteria" or "Upload your first batch!") with a CTA button linking to `/dashboard/batch-upload`.
+                    *   Use `motion` components for subtle list item animations (e.g., fade-in).
+
+    *   **8.4.2: Create Batch Detail Action & Page (`/dashboard/batches/[batchId]`)**:
+        *   **Action**: Define `fetchBatchDetailsAction` server action. Implement the detail page structure.
+        *   **Files**: `actions/batch/batchActions.ts` (New Action), `app/(dashboard)/dashboard/batches/[batchId]/page.tsx` (New Page).
+        *   **Instructions**:
+            1.  **`fetchBatchDetailsAction`**:
+                *   Accept `batchId` parameter.
+                *   Authenticate user (`getCurrentUser`).
+                *   Query `extraction_batches` table `WHERE eq(id, batchId) AND eq(userId, ...)`. If not found, return error `ActionState`.
+                *   Query associated `documents` table `WHERE eq(batchId, batchId)`, potentially with pagination/sorting options passed in. Select necessary columns: `id`, `originalFilename`, `status`, `pageCount`, `extraction_prompt` (the per-doc one), `updatedAt`.
+                *   Return `ActionState<{ batch: SelectExtractionBatch, documents: SelectDocument[] /* Add pagination info if needed */ }>`.
+            2.  **`page.tsx` (Server Component)**:
+                *   Get `batchId` from `params`.
+                *   Fetch initial batch and document data using `fetchBatchDetailsAction(batchId)`.
+                *   Handle "Not Found" or "Access Denied" errors from the action (e.g., show a 404 page or error message).
+                *   Pass fetched `batch` and initial `documents` data to `BatchDetailClient`.
+
     *   **8.4.3: Implement Batch Detail Client Component**:
-        *   **Action**: Build `components/batch/BatchDetailClient.tsx`.
-        *   **Files**: `components/batch/BatchDetailClient.tsx` (New).
-        *   **Instructions**: Display batch summary (Name, Status, Strategy, Global Prompt if applicable). Display simple document list: Filename, Status Badge. *Defer per-document prompt display and advanced filtering/polling for MVP.* Link completed docs to review page.
+        *   **Action**: Build the interactive client component for displaying detailed batch information and associated documents.
+        *   **Files**: `components/batch/BatchDetailClient.tsx` (New Component).
+        *   **Instructions**:
+            1.  `"use client"`. Receive initial `batch` and `documents` props.
+            2.  Use `useSWR` or similar for polling/refreshing batch status and potentially the document list (key SWR with `batchId` and any document filters/sort state).
+            3.  **Batch Summary Display**:
+                *   Use `Card` components to display key batch info: Name, ID, Status (`Badge`), **Prompt Strategy** (display 'Global', 'Per-Document', or 'Auto-Detect').
+                *   If strategy is 'Global', display the `batch.extraction_prompt` (potentially truncated with a "Show More" modal/tooltip).
+                *   Show **Detailed Progress**: Display counts (`Completed: X`, `Failed: Y`, `Pending: Z`) and a prominent `Progress` bar.
+                *   Display Dates: Submitted, Started Processing (if available), Completed At.
+                *   Display **Total Pages**.
+            4.  **Document List Display**:
+                *   Use `DataTable` for the list of documents within the batch.
+                *   **Columns:** Filename (with file type icon), Status (`Badge` with color/icon), **Page Count**, **Effective Prompt** (Display per-doc prompt snippet; use Tooltip/Dialog for full prompt; indicate if 'Global' or 'Auto-resolved' was used), Last Updated (`formatRelativeTime`), Error Message (if status is 'failed', truncated with tooltip/modal).
+                *   **Actions Column:** Include "Review" button (`Link href="/dashboard/review/[documentId]"`) enabled only for `completed` status, potentially "Retry" for `failed` status (Phase 2 enhancement), and "Delete" (with confirmation).
+                *   Implement client-side filtering (by Status) and sorting (by Name, Status, Updated Date) for the document list within the batch detail view.
+            5.  **Interactivity**: Use `motion` for smooth transitions when data updates. Use `Tooltip` extensively for providing more details on hover (e.g., full filenames, full prompts, exact timestamps).
+            6.  Handle loading and error states gracefully within the component.
+
+---
+
+**Security Considerations Integrated:**
+
+*   All data fetching actions (`fetchUserBatchesAction`, `fetchBatchDetailsAction`) **must** include `WHERE eq(userId, currentUserId)` clauses, enforced by getting the user ID via `getCurrentUser()` within the action. This leverages the database RLS implicitly but provides an explicit application-level check.
+*   Links to document review pages (`/dashboard/review/[documentId]`) rely on the RLS and ownership checks within the `fetchDocumentForReviewAction` on the target page.
+*   Delete actions must verify ownership before proceeding.
+
+**Production Readiness Focus:**
+
+*   **Performance:** Use pagination and server-side sorting/filtering for the main batch list. Client-side filtering/sorting is acceptable for the document list within a single batch detail view (assuming batches aren't excessively large for the MVP). Leverage `useSWR` for efficient data fetching and caching. Use `Skeleton` components for better perceived performance during loading.
+*   **Reliability:** Implement robust error handling in both server actions and client components. Provide clear feedback to the user on failures. SWR's automatic retry can help with transient network issues.
+*   **UX:** Follow consistent design patterns using Shadcn/ui. Provide clear visual cues for statuses and progress. Use tooltips and modals effectively to avoid cluttering the main view. Ensure responsiveness across different screen sizes.
+*   **Maintainability:** Structure components logically (e.g., `BatchListClient`, `BatchDetailClient`). Use TypeScript types consistently.
+
+This enhanced plan for Step 8.4 aims to deliver a user interface that is not just functional but also informative, polished, and aligned with the expectations of a modern SaaS application, directly addressing the feedback to move beyond a basic MVP for this crucial user-facing monitoring feature.
 
 ---
 
@@ -269,4 +409,27 @@
         *   **Accurate Quota Test:** Set low DB quota. Submit batch exceeding quota based on *actual page counts*. Verify expected failures and correct usage increment for successes.
         *   Verify basic status updates on list/detail pages.
 
+Successful upload of a single valid file via button click.
+Successful upload of a batch of valid files via drag-and-drop.
+Attempting to upload files exceeding size limits (expect error).
+Attempting to upload disallowed file types (expect error).
+Attempting to upload more files than the batch limit (expect error).
+Uploading a mix of valid and invalid files (verify correct handling of each).
+Cancelling an individual file upload during transfer.
+Cancelling an entire batch upload during transfer.
+Simulating network interruption during upload and verifying resumability (if implemented).
+Verifying correct status updates throughout the process (Waiting, Uploading, Processing, Complete, Error).
+Verifying successful AI processing and data extraction (if applicable) by checking final status or querying results.
+Verifying specific error messages are displayed correctly for different failure modes (network, validation, server error, virus scan fail).
+
+
 ---
+
+
+
+
+
+
+
+
+

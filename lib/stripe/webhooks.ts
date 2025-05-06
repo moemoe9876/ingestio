@@ -228,8 +228,8 @@ async function handleSubscriptionUpdated(
     const userId = metadata.userId || product.metadata.userId || null;
     
     // Extract current period info
-    const currentPeriodStart = new Date(subscription.current_period_start * 1000);
-    const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
+    const currentPeriodStart = new Date((subscription as any).current_period_start * 1000);
+    const currentPeriodEnd = new Date((subscription as any).current_period_end * 1000);
     
     return {
       success: true,
@@ -297,7 +297,8 @@ async function handleInvoicePaymentSucceeded(
 ): Promise<WebhookHandlerResult> {
   try {
     const customerId = invoice.customer as string;
-    const subscriptionId = invoice.subscription as string;
+    const sub = (invoice as any).subscription;
+    const subscriptionId = typeof sub === 'string' ? sub : (sub && sub.id ? sub.id : null);
     
     if (!customerId || !subscriptionId) {
       throw new Error('Missing customerId or subscriptionId in invoice');
@@ -338,7 +339,8 @@ async function handleInvoicePaymentFailed(
 ): Promise<WebhookHandlerResult> {
   try {
     const customerId = invoice.customer as string;
-    const subscriptionId = invoice.subscription as string;
+    const sub = (invoice as any).subscription;
+    const subscriptionId = typeof sub === 'string' ? sub : (sub && sub.id ? sub.id : null);
     
     if (!customerId || !subscriptionId) {
       throw new Error('Missing customerId or subscriptionId in failed invoice');
