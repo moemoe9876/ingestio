@@ -10,7 +10,7 @@ CREATE POLICY "Users can view their own usage"
 
 -- Service role needs to insert/update usage records
 CREATE POLICY "Service role full access on user_usage"
-  ON "public"."user_usage" FOR ALL
+  ON "public"."user_usage" FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);
 
@@ -43,7 +43,7 @@ CREATE POLICY "Users can delete their own documents"
   USING ((select auth.jwt()->>'sub') = "user_id");
 
 CREATE POLICY "Service role full access on documents"
-  ON "public"."documents" FOR ALL
+  ON "public"."documents" FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);
 
@@ -76,7 +76,7 @@ CREATE POLICY "Users can delete their own batches" -- Added Delete
   USING ((select auth.jwt()->>'sub') = "user_id");
 
 CREATE POLICY "Service role full access on extraction_batches"
-  ON "public"."extraction_batches" FOR ALL
+  ON "public"."extraction_batches" FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);
 
@@ -102,7 +102,7 @@ CREATE POLICY "Users can insert their own jobs"
 -- CREATE POLICY "Users can delete their own jobs" ON "public"."extraction_jobs" FOR DELETE ...
 
 CREATE POLICY "Service role full access on extraction_jobs"
-  ON "public"."extraction_jobs" FOR ALL
+  ON "public"."extraction_jobs" FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);
 
@@ -132,7 +132,7 @@ CREATE POLICY "Users can delete their own extracted data"
   USING ((select auth.jwt()->>'sub') = "user_id");
 
 CREATE POLICY "Service role full access on extracted_data"
-  ON "public"."extracted_data" FOR ALL
+  ON "public"."extracted_data" FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);
 
@@ -160,7 +160,7 @@ CREATE POLICY "Users can delete their own exports"
   USING ((select auth.jwt()->>'sub') = "user_id");
 
 CREATE POLICY "Service role full access on exports"
-  ON "public"."exports" FOR ALL
+  ON "public"."exports" FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);
 

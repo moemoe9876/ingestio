@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1725104620592,
-      "tag": "0000_nostalgic_mauler",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1743921394250,
-      "tag": "0001_red_wither",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1744234039088,
-      "tag": "0002_pale_luckman",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1745628690831,
-      "tag": "0003_rare_puck",
+      "when": 1746491923875,
+      "tag": "0000_clean_fabian_cortez",
       "breakpoints": true
     }
   ]

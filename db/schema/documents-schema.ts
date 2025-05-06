@@ -26,6 +26,8 @@ export const documentsTable = pgTable("documents", {
   mimeType: text("mime_type").notNull(),
   fileSize: integer("file_size").notNull(),
   pageCount: integer("page_count").notNull(),
+  // Add extraction_prompt for per-document prompts
+  extractionPrompt: text("extraction_prompt"),
   status: documentStatusEnum("status").default("uploaded").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })

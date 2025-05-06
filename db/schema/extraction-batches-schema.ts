@@ -5,24 +5,14 @@ Defines the schema for extraction batches.
 */
 
 import {
-    integer, // Import pgEnum
-    pgTable,
-    text,
-    timestamp,
-    uuid
+  integer, // Import pgEnum
+  pgTable,
+  text,
+  timestamp,
+  uuid
 } from "drizzle-orm/pg-core";
-import { batchStatusEnum } from "./enums"; // Import from enums.ts
+import { batchStatusEnum, promptStrategyEnum } from "./enums"; // Import from enums.ts
 import { profilesTable } from "./profiles-schema";
-
-// Define the enum
-// export const batchStatusEnum = pgEnum("batch_status_enum", [
-//   "pending_upload",
-//   "queued",
-//   "processing",
-//   "completed",
-//   "partially_completed",
-//   "failed",
-// ]);
 
 export const extractionBatchesTable = pgTable("extraction_batches", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -30,14 +20,16 @@ export const extractionBatchesTable = pgTable("extraction_batches", {
     .notNull()
     .references(() => profilesTable.userId, { onDelete: "cascade" }),
   name: text("name"),
-  // Add extractionPrompt
-  extractionPrompt: text("extraction_prompt").notNull(),
+  // Add prompt strategy
+  promptStrategy: promptStrategyEnum("prompt_strategy").notNull().default("global"),
+  // Make extraction prompt nullable
+  extractionPrompt: text("extraction_prompt"),
   // Update status to use the enum and set default
   status: batchStatusEnum("status").default("pending_upload").notNull(),
   documentCount: integer("document_count").default(0).notNull(),
   completedCount: integer("completed_count").default(0).notNull(),
   failedCount: integer("failed_count").default(0).notNull(),
-  // Add totalPages
+  // Ensure totalPages is defined correctly
   totalPages: integer("total_pages").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
