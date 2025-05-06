@@ -1,5 +1,8 @@
 ## 1 Need update pdf viewer for multipage pdf documents, currently throwing up errors when uploaded
 
+  
+
+  
 
 ## Remove the bounding boxed data when users export their data in json format and maybe provide option to include include bounding boxes data.
  
@@ -40,3 +43,12 @@ Here's the reasoning:
 4.  **Billing Cycle Reset Logic (`actions/stripe/webhook-actions.ts` & `actions/db/user-usage-actions.ts`):** When a Stripe event like `invoice.paid` (signifying a renewal) occurs, the webhook handler calls `createUserUsageAction`. This action is designed to create a *new* usage record for the *new* billing period, explicitly setting `pagesProcessed` to `0`. This clearly indicates a reset and no carry-over from the previous cycle.
 
 **In conclusion:** The current system operates on a standard monthly quota model where usage resets at the beginning of each billing cycle, and unused pages from the previous cycle expire ("use it or lose it"). There is no code supporting the carry-over of unused pages.
+
+
+
+
+
+## add delete all button in batch-upload files 
+
+
+## I have some duplication problem inside the user usage table in my superbase. I'm receiving, I have a user ID, I have two user IDs which have the identical IDs, however they have different UUID, ID and so it's the same user, it's assigning different pages process to different IDs, even though this should just be one user ID inside the usage table.

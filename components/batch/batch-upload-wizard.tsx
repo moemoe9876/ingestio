@@ -6,11 +6,12 @@ import { Card, CardContent } from "@/components/ui/card"
 import { getPlanById, PlanId } from "@/lib/config/subscription-plans"
 import { formatFileSize } from "@/lib/utils/format-file-size"
 import { StripeCustomerDataKV } from "@/types/stripe-kv-types"
-import { AlertCircle, BadgePercent, Check, FileText, Image as ImageIcon, UploadCloud, X } from "lucide-react"
+import { AlertCircle, Check, FileText, Image as ImageIcon, UploadCloud, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState, useTransition } from "react"
 import { FileRejection, useDropzone } from "react-dropzone"
 import { PlanInfo } from "./plan-info"
+import { PromptConfiguration } from "./prompt-configuration"
 import { WizardNav } from "./wizard-nav"
 
 type PromptStrategy = "global" | "per_document" | "auto"
@@ -195,10 +196,21 @@ export default function BatchUploadWizard({
             )}
             
             {currentStep === 2 && (
-              <div className="text-center py-12">
-                <BadgePercent className="h-16 w-16 text-muted-foreground/50 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold mb-2">Configure Prompts</h3>
-                <p className="text-muted-foreground">Define how Ingestio should extract data from your documents.</p>
+              <div className="space-y-6">
+                <PromptConfiguration
+                  promptStrategy={promptStrategy as any}
+                  setPromptStrategy={(val) => setPromptStrategy(val as any)}
+                  globalPrompt={globalPrompt}
+                  setGlobalPrompt={setGlobalPrompt}
+                  perDocumentPrompts={perDocPrompts}
+                  setPerDocumentPrompts={setPerDocPrompts}
+                  files={selectedFiles.map(f => ({
+                    name: f.name,
+                    size: f.size,
+                    type: f.type,
+                    valid: true,
+                  }))}
+                />
               </div>
             )}
             
@@ -273,7 +285,14 @@ export default function BatchUploadWizard({
             {currentStep < 3 ? (
               <Button 
                 onClick={handleNextStep}
-                disabled={(currentStep === 1 && validFileCount === 0) || isPending}
+                disabled={
+                  (currentStep === 1 && validFileCount === 0) ||
+                  (currentStep === 2 && (
+                    (promptStrategy === "global" && !globalPrompt.trim()) ||
+                    (promptStrategy === "per_document" && selectedFiles.some(f => !(perDocPrompts[f.name] && perDocPrompts[f.name].trim())))
+                  )) ||
+                  isPending
+                }
                 className="text-base py-2.5 px-6"
                 size="lg"
               >

@@ -8,6 +8,7 @@ import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { db } from "@/db/db";
 import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema";
 import { RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting/limiter";
+import { getUTCMonthEnd, getUTCMonthStart } from "@/lib/utils/date-utils";
 import { ActionState } from "@/types";
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 
@@ -44,112 +45,73 @@ export async function initializeUserUsageAction(
   userId: string,
   options?: {
     startDate?: Date;
-    endDate?: Date;
   }
 ): Promise<ActionState<SelectUserUsage>> {
   try {
-    // Calculate billing period dates
-    // Use provided dates if available, otherwise use first to last day of current month
     const now = new Date();
-    const billingPeriodStart = options?.startDate || new Date(now.getFullYear(), now.getMonth(), 1);
-    const billingPeriodEnd = options?.endDate || new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    
-    // First check if a record already exists for this billing period
-    const existingUsage = await db
-      .select()
-      .from(userUsageTable)
-      .where(
-        and(
-          eq(userUsageTable.userId, userId),
-          eq(userUsageTable.billingPeriodStart, billingPeriodStart)
-        )
-      )
-      .limit(1);
-    
-    // If a record already exists, return it
-    if (existingUsage.length > 0) {
-      return {
-        isSuccess: true,
-        message: "User usage record already exists",
-        data: existingUsage[0]
-      };
-    }
-    
-    // Get user's subscription data from KV store (source of truth)
+    const referenceDate = options?.startDate || now;
+
+    const utcMonthStart = getUTCMonthStart(referenceDate);
+    const utcMonthEnd = getUTCMonthEnd(referenceDate);
+
     const subscriptionResult = await getUserSubscriptionDataKVAction();
     
-    // *** ADDED CHECK: Fail early if KV lookup fails ***
     if (!subscriptionResult.isSuccess) {
       console.error(`[initializeUserUsageAction] Failed to retrieve subscription data for user ${userId}: ${subscriptionResult.message}`);
-      // Return a specific error indicating the KV failure prevented initialization
       return {
         isSuccess: false,
         message: `Failed to initialize usage: ${subscriptionResult.message}`
       };
     }
     
-    // Determine tier based on subscription status and planId
     let tier: SubscriptionTier = "starter";
     if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
       tier = subscriptionResult.data.planId as SubscriptionTier;
     }
     
-    // Get page limit for tier
     const pagesLimit = RATE_LIMIT_TIERS[tier]?.pagesPerMonth || 25;
-    
-    // Create new usage record
-    const [newUsage] = await db.insert(userUsageTable).values({
+
+    const valuesToInsert: InsertUserUsage = {
       userId,
-      billingPeriodStart,
-      billingPeriodEnd,
+      billingPeriodStart: utcMonthStart,
+      billingPeriodEnd: utcMonthEnd,
       pagesProcessed: 0,
       pagesLimit,
-      createdAt: now,
-      updatedAt: now
-    }).returning();
-    
-    return {
-      isSuccess: true,
-      message: "User usage record initialized successfully",
-      data: newUsage
     };
-  } catch (error) {
-    console.error("Error initializing user usage record:", error);
-    
-    // Attempt to retrieve the record if it was a duplicate key error
-    // This handles race conditions where another request created the record
-    // between our check and insert
-    if (error instanceof Error && error.message.includes('duplicate key')) {
-      try {
-        const now = new Date();
-        const billingPeriodStart = options?.startDate || new Date(now.getFullYear(), now.getMonth(), 1);
-        
-        const [existingUsage] = await db
-          .select()
-          .from(userUsageTable)
-          .where(
-            and(
-              eq(userUsageTable.userId, userId),
-              eq(userUsageTable.billingPeriodStart, billingPeriodStart)
-            )
-          )
-          .limit(1);
-          
-        if (existingUsage) {
-          return {
-            isSuccess: true,
-            message: "Retrieved existing user usage record",
-            data: existingUsage
-          };
-        }
-      } catch (secondaryError) {
-        console.error("Error retrieving existing usage record:", secondaryError);
-      }
+
+    const [resultUsageRecord] = await db
+      .insert(userUsageTable)
+      .values(valuesToInsert)
+      .onConflictDoUpdate({
+        target: [userUsageTable.userId, userUsageTable.billingPeriodStart],
+        set: {
+          pagesProcessed: 0,
+          pagesLimit: pagesLimit,
+          billingPeriodEnd: utcMonthEnd,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    if (!resultUsageRecord) {
+      console.error(`[initializeUserUsageAction] Upsert operation did not return a record for user ${userId}.`);
+      return {
+        isSuccess: false,
+        message: "Failed to initialize or update user usage record.",
+      };
     }
     
     return {
+      isSuccess: true,
+      message: "User usage record initialized/updated successfully",
+      data: resultUsageRecord,
+    };
+
+  } catch (error) {
+    console.error("Error initializing/updating user usage record:", error);
+    return {
       isSuccess: false,
-      message: error instanceof Error ? error.message : "Unknown error initializing user usage"
+      message: error instanceof Error ? error.message : "Unknown error initializing/updating user usage"
     };
   }
 }

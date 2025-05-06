@@ -69,3 +69,14 @@ export function createUTCDate(): Date {
 export function isoToUTCDate(isoString: string): Date {
   return new Date(isoString);
 }
+
+export function getUTCMonthStart(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 0, 0, 0, 0));
+}
+
+export function getUTCMonthEnd(date: Date): Date {
+  // Go to the start of the next month, then subtract 1 millisecond
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  return new Date(Date.UTC(year, month + 1, 1, 0, 0, 0, 0) - 1);
+}
