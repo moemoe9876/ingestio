@@ -10,7 +10,7 @@ import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema";
 import { RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting/limiter";
 import { getUTCMonthEnd, getUTCMonthStart } from "@/lib/utils/date-utils";
 import { ActionState } from "@/types";
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 
 /**
  * Create a new user usage record
@@ -51,9 +51,6 @@ export async function initializeUserUsageAction(
     const now = new Date();
     const referenceDate = options?.startDate || now;
 
-    const utcMonthStart = getUTCMonthStart(referenceDate);
-    const utcMonthEnd = getUTCMonthEnd(referenceDate);
-
     const subscriptionResult = await getUserSubscriptionDataKVAction();
     
     if (!subscriptionResult.isSuccess) {
@@ -65,36 +62,127 @@ export async function initializeUserUsageAction(
     }
     
     let tier: SubscriptionTier = "starter";
-    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
-      tier = subscriptionResult.data.planId as SubscriptionTier;
+    let authoritativeBillingPeriodStart: Date;
+    let authoritativeBillingPeriodEnd: Date;
+
+    if (
+      subscriptionResult.data.status === 'active' &&
+      subscriptionResult.data.currentPeriodStart &&
+      subscriptionResult.data.currentPeriodEnd 
+    ) {
+      const stripePeriodStart = new Date(subscriptionResult.data.currentPeriodStart * 1000);
+      const stripePeriodEnd = new Date(subscriptionResult.data.currentPeriodEnd * 1000);
+      
+      // Check if the Stripe period is current (e.g., encompasses 'now' or 'referenceDate')
+      // This check is important if KV data could be stale, though syncStripeDataToKV should keep it fresh.
+      if (stripePeriodStart <= referenceDate && stripePeriodEnd >= referenceDate) {
+        authoritativeBillingPeriodStart = stripePeriodStart;
+        authoritativeBillingPeriodEnd = stripePeriodEnd;
+        tier = (subscriptionResult.data.planId as SubscriptionTier) || "starter";
+        console.log(`[initializeUserUsageAction] Using Stripe authoritative period for user ${userId}: ${authoritativeBillingPeriodStart.toISOString()} - ${authoritativeBillingPeriodEnd.toISOString()}`);
+      } else {
+        // Stripe data present but not for the current reference period, use calculated UTC month
+        console.warn(`[initializeUserUsageAction] Stripe period for user ${userId} (${stripePeriodStart.toISOString()} - ${stripePeriodEnd.toISOString()}) does not cover reference date ${referenceDate.toISOString()}. Falling back to UTC month.`);
+        authoritativeBillingPeriodStart = getUTCMonthStart(referenceDate);
+        authoritativeBillingPeriodEnd = getUTCMonthEnd(referenceDate);
+        // Tier might still be derivable from subscriptionResult if planId is there, even if period dates aren't current
+        tier = (subscriptionResult.data.planId as SubscriptionTier) || "starter"; 
+      }
+    } else {
+      // No active Stripe subscription or missing period data, fall back to calculated UTC month
+      console.log(`[initializeUserUsageAction] No active Stripe subscription or period data for user ${userId}. Using calculated UTC month based on ${referenceDate.toISOString()}.`);
+      authoritativeBillingPeriodStart = getUTCMonthStart(referenceDate);
+      authoritativeBillingPeriodEnd = getUTCMonthEnd(referenceDate);
+      // Tier defaults to starter if no subscription info
+      tier = "starter";
     }
     
-    const pagesLimit = RATE_LIMIT_TIERS[tier]?.pagesPerMonth || 25;
+    const pagesLimit = RATE_LIMIT_TIERS[tier]?.pagesPerMonth || RATE_LIMIT_TIERS["starter"].pagesPerMonth;
+    console.log(`[initializeUserUsageAction] User ${userId}, Tier: ${tier}, Pages Limit: ${pagesLimit}`);
 
-    const valuesToInsert: InsertUserUsage = {
-      userId,
-      billingPeriodStart: utcMonthStart,
-      billingPeriodEnd: utcMonthEnd,
-      pagesProcessed: 0,
-      pagesLimit,
-    };
+    // Attempt to find an existing record for the current calendar month (UTC)
+    // matching the authoritativeBillingPeriodStart's month.
+    const [existingUsageForMonth] = await db
+      .select()
+      .from(userUsageTable)
+      .where(
+        and(
+          eq(userUsageTable.userId, userId),
+          sql<boolean>`DATE_TRUNC('month', ${userUsageTable.billingPeriodStart} AT TIME ZONE 'UTC') = DATE_TRUNC('month', ${authoritativeBillingPeriodStart.toISOString()} AT TIME ZONE 'UTC')`
+        )
+      )
+      .orderBy(desc(userUsageTable.billingPeriodStart), desc(userUsageTable.updatedAt)) // Prefer latest start or update if (unlikely) duplicates
+      .limit(1);
 
-    const [resultUsageRecord] = await db
-      .insert(userUsageTable)
-      .values(valuesToInsert)
-      .onConflictDoUpdate({
-        target: [userUsageTable.userId, userUsageTable.billingPeriodStart],
-        set: {
-          pagesProcessed: 0,
-          pagesLimit: pagesLimit,
-          billingPeriodEnd: utcMonthEnd,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
+    let resultUsageRecord: SelectUserUsage | undefined;
+
+    if (existingUsageForMonth) {
+      console.log(`[initializeUserUsageAction] Found existing usage record for user ${userId} for month of ${authoritativeBillingPeriodStart.toISOString()}: ID ${existingUsageForMonth.id}`);
+      // Record exists, update it if necessary
+      const updates: Partial<InsertUserUsage> = {
+        updatedAt: new Date(),
+        // Normalize billingPeriodStart and billingPeriodEnd to authoritative values
+        billingPeriodStart: authoritativeBillingPeriodStart,
+        billingPeriodEnd: authoritativeBillingPeriodEnd,
+        pagesLimit: pagesLimit,
+        // CRITICAL: DO NOT include pagesProcessed here to preserve it.
+      };
+
+      // Only update if there are actual changes needed to avoid unnecessary writes
+      if (
+        existingUsageForMonth.billingPeriodStart.getTime() !== authoritativeBillingPeriodStart.getTime() ||
+        existingUsageForMonth.billingPeriodEnd.getTime() !== authoritativeBillingPeriodEnd.getTime() ||
+        existingUsageForMonth.pagesLimit !== pagesLimit
+      ) {
+        console.log(`[initializeUserUsageAction] Updating existing usage record ID ${existingUsageForMonth.id} for user ${userId}. New limit: ${pagesLimit}, New period: ${authoritativeBillingPeriodStart.toISOString()} - ${authoritativeBillingPeriodEnd.toISOString()}`);
+        const [updatedRecord] = await db
+          .update(userUsageTable)
+          .set(updates)
+          .where(eq(userUsageTable.id, existingUsageForMonth.id))
+          .returning();
+        resultUsageRecord = updatedRecord;
+      } else {
+        console.log(`[initializeUserUsageAction] No changes needed for existing usage record ID ${existingUsageForMonth.id} for user ${userId}.`);
+        resultUsageRecord = existingUsageForMonth;
+      }
+      
+      // Fallback in case returning() fails unexpectedly after a successful update
+      if (!resultUsageRecord && (
+        existingUsageForMonth.billingPeriodStart.getTime() !== authoritativeBillingPeriodStart.getTime() ||
+        existingUsageForMonth.billingPeriodEnd.getTime() !== authoritativeBillingPeriodEnd.getTime() ||
+        existingUsageForMonth.pagesLimit !== pagesLimit
+      )) {
+          console.warn(`[initializeUserUsageAction] Update operation for user ${userId} did not return a record. Using stale existingUsageForMonth as fallback after attempting update.`);
+          // If an update was attempted but returned nothing, the existing record is now stale.
+          // It's safer to re-fetch or consider it an error, but for now, we'll use the pre-update state.
+          // A more robust solution might throw or re-fetch: resultUsageRecord = await db.select()...where(id)
+          resultUsageRecord = { ...existingUsageForMonth, ...updates }; // Simulate the update locally for the return
+      } else if (!resultUsageRecord) {
+         resultUsageRecord = existingUsageForMonth;
+      }
+
+
+    } else {
+      console.log(`[initializeUserUsageAction] No existing usage record found for user ${userId} for month of ${authoritativeBillingPeriodStart.toISOString()}. Creating new record.`);
+      // No record exists for this calendar month, insert a new one
+      const valuesToInsert: InsertUserUsage = {
+        userId,
+        billingPeriodStart: authoritativeBillingPeriodStart,
+        billingPeriodEnd: authoritativeBillingPeriodEnd,
+        pagesProcessed: 0, // New record starts with 0 pages processed
+        pagesLimit,
+        // createdAt will be set by DB default if configured, or manually: createdAt: new Date()
+      };
+      const [insertedRecord] = await db
+        .insert(userUsageTable)
+        .values(valuesToInsert)
+        .returning();
+      resultUsageRecord = insertedRecord;
+      console.log(`[initializeUserUsageAction] Created new usage record ID ${resultUsageRecord?.id} for user ${userId}.`);
+    }
 
     if (!resultUsageRecord) {
-      console.error(`[initializeUserUsageAction] Upsert operation did not return a record for user ${userId}.`);
+      console.error(`[initializeUserUsageAction] Upsert/Select operation did not yield a record for user ${userId}.`);
       return {
         isSuccess: false,
         message: "Failed to initialize or update user usage record.",

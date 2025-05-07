@@ -5,10 +5,9 @@
  */
 
 import {
-  createUserUsageAction
+  initializeUserUsageAction
 } from "@/actions/db/user-usage-actions"
 import { trackServerEvent } from "@/lib/analytics/server"
-import { getPlanById } from "@/lib/config/subscription-plans"
 import { processStripeWebhook } from "@/lib/stripe/webhooks"
 import { ActionState } from "@/types"
 import {
@@ -90,31 +89,18 @@ export async function processStripeWebhookAction(
 
         // Reset usage if applicable
         if (eventType === "invoice.paid" && isActiveSub && userId) {
-          console.log(`[Webhook] Event is invoice.paid. Resetting usage for user ${userId}.`);
-          const billingPeriodStart = syncedData.currentPeriodStart
-            ? new Date(syncedData.currentPeriodStart * 1000)
-            : undefined
-          const billingPeriodEnd = syncedData.currentPeriodEnd
-            ? new Date(syncedData.currentPeriodEnd * 1000)
-            : undefined
+          console.log(`[Webhook] Event is invoice.paid. Initializing/updating usage for user ${userId} based on new invoice period.`);
+          
+          // The refined initializeUserUsageAction will internally fetch the latest subscription data
+          // (which should have been updated in KV by syncStripeDataToKV prior to this action running, or as part of it)
+          // and use its currentPeriodStart and currentPeriodEnd as authoritative dates.
+          // It also handles setting pagesProcessed to 0 if it determines it's a new billing month record.
+          const initUsageResult = await initializeUserUsageAction(userId);
 
-          if (billingPeriodStart && billingPeriodEnd) {
-            const plan = getPlanById(membership) // Get the plan object
-            const resetUsageResult = await createUserUsageAction({
-              userId: userId,
-              // Pass Date objects directly if the action expects them
-              billingPeriodStart: billingPeriodStart,
-              billingPeriodEnd: billingPeriodEnd,
-              pagesLimit: plan?.documentQuota ?? 0, // Get limit from plan config
-              pagesProcessed: 0 // Reset processed count
-            })
-            if (!resetUsageResult.isSuccess) {
-              console.error(`[Webhook] Failed to reset usage for user ${userId}: ${resetUsageResult.message}`);
-            } else {
-              console.log(`[Webhook] Successfully reset usage for user ${userId}.`);
-            }
+          if (!initUsageResult.isSuccess) {
+            console.error(`[Webhook] Failed to initialize/update usage for user ${userId} after invoice.paid: ${initUsageResult.message}`);
           } else {
-            console.warn(`[Webhook] Missing billing period dates for usage reset.`);
+            console.log(`[Webhook] Successfully initialized/updated usage for user ${userId} after invoice.paid. Usage data:`, initUsageResult.data);
           }
         }
       } else {

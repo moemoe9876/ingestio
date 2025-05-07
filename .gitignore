@@ -49,9 +49,7 @@ service-account.json
 *-credentials.json
 
 # docs directory - Contains documentation for the project
-/docs/
-/memory-bank/
-/todo/
+/todo-docs//
 
 # Cursor AI configuration directory - As requested
 /.cursor/

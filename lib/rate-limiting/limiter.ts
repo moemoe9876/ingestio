@@ -20,7 +20,7 @@ export const RATE_LIMIT_TIERS = {
   starter: {
     pagesPerMonth: 25,
     maxBatchSize: 1, // No batch processing
-    requestsPerMinute: 5 // Conservative limit for API requests
+    requestsPerMinute: 1 // Conservative limit for API requests
   },
   // Plus tier - 250 pages per month, batch up to 25
   plus: {
