@@ -51,7 +51,7 @@ export async function initializeUserUsageAction(
     const now = new Date();
     const referenceDate = options?.startDate || now;
 
-    const subscriptionResult = await getUserSubscriptionDataKVAction();
+    const subscriptionResult = await getUserSubscriptionDataKVAction(userId);
     
     if (!subscriptionResult.isSuccess) {
       console.error(`[initializeUserUsageAction] Failed to retrieve subscription data for user ${userId}: ${subscriptionResult.message}`);

@@ -4,9 +4,9 @@ This API route handles Stripe webhook events to manage subscription status chang
 </ai_context>
 */
 
-import { processStripeWebhookAction } from '@/actions/stripe'
-import { headers } from 'next/headers'
-import { NextResponse } from 'next/server'
+import { processStripeWebhookAction } from '@/actions/stripe';
+import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +14,8 @@ export async function POST(request: Request) {
     const rawBody = await request.text()
     
     // Get the Stripe signature from headers
-    const signature = headers().get('stripe-signature')
+    const headerList = await headers();
+    const signature = headerList.get('stripe-signature');
     
     if (!signature) {
       console.error('Missing Stripe signature')

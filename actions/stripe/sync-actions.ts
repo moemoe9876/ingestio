@@ -53,12 +53,14 @@ export async function syncSubscriptionAfterSuccessAction(): Promise<ActionState<
  * 3. If found in profile but not in Redis, trigger a sync from Stripe to Redis
  * 4. If all else fails, return a default 'none' status
  * 
+ * @param userIdOfBillingUser Optional. The ID of the user whose subscription data is being fetched.
+ *                            If not provided, the current authenticated user's ID will be used.
  * @returns ActionState containing the user's subscription data or error
  */
-export async function getUserSubscriptionDataKVAction(): Promise<ActionState<StripeCustomerDataKV>> {
+export async function getUserSubscriptionDataKVAction(userIdOfBillingUser?: string): Promise<ActionState<StripeCustomerDataKV>> {
   try {
-    // Get the current authenticated user ID
-    const userId = await getCurrentUser();
+    // Get the user ID
+    const userId = userIdOfBillingUser ?? await getCurrentUser();
     console.log(`[Subscription Data] Retrieving subscription data for user ${userId}`);
     
     // Step 1: Try to get customerID from Redis KV store

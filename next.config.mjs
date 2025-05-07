@@ -13,6 +13,9 @@ const nextConfig = {
       { hostname: "images.clerk.dev" }
     ]
   },
+  experimental: {
+    allowedDevOrigins: ["premium-slug-quietly.ngrok-free.app"],
+  },
   webpack: (config) => {
     config.resolve.alias.canvas = false;
     return config;
