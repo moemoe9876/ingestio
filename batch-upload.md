@@ -90,13 +90,13 @@
 
 ---
 
-**(Revised) Step 8.1: Implement Batch Upload UI (3-Step Wizard - Based on v0 Mockup)**
+**Step 8.1: Implement Batch Upload UI (3-Step Wizard - Based on v0 Mockup)**
 
 *   **Task**: Develop the multi-step frontend interface (Wizard) for batch uploads, precisely following the design and flow demonstrated in the provided v0 UI mockup screenshots.
 *   **Goal**: Create an intuitive, accessible, and informative 3-step wizard that guides users through file selection, prompt configuration, and batch review/submission, while respecting tier limits derived from the KV store and providing clear feedback as per the v0 mockup.
 *   **Modules**:
 
-    *   **8.1.1: Create Batch Upload Page & Wizard Wrapper Component**:
+    *  [x] **8.1.1: Create Batch Upload Page & Wizard Wrapper Component**:
         *   **Action**: Set up the main page at `app/(dashboard)/dashboard/batch-upload/page.tsx`. This page will render a new primary client component, `components/batch/BatchUploadWizard.tsx`, which will manage the state and rendering of the 3-step wizard. Implement tier-based access control.
         *   **Files**:
             *   `app/(dashboard)/dashboard/batch-upload/page.tsx` (New or modify existing)
@@ -131,7 +131,7 @@
                 *   `handleNextStep()`, `handlePreviousStep()`.
                 *   `handleSubmitBatch()`: Prepares `FormData` and calls `createBatchUploadAction` using `startTransition`.
 
-    *   **8.1.2: Implement Step 1: File Selection UI & Logic**:
+    *  [x] **8.1.2: Implement Step 1: File Selection UI & Logic**:
         *   **Action**: Integrate or adapt the file upload functionality shown in the v0 mockup's `file-upload.tsx` into the 'Files' step of `BatchUploadWizard.tsx`.
         *   **Files**: `components/batch/BatchUploadWizard.tsx`, `components/utilities/BatchFileUpload.tsx` (Adapt or use v0's `file-upload.tsx` logic).
         *   **Instructions (within `BatchUploadWizard.tsx` - Files Step Content)**:
@@ -156,7 +156,7 @@
             5.  **Navigation:** "Next: Configure Prompts" button, disabled if no valid files are selected.
             6.  **Accessibility:** Ensure dropzone and file list are keyboard navigable and screen-reader friendly (Report Sec 2.6).
 
-    *   **8.1.3: Implement Step 2: Prompt Configuration UI & Logic**:
+    *  [x] **8.1.3: Implement Step 2: Prompt Configuration UI & Logic**:
         *   **Action**: Implement the UI for selecting prompt strategy and inputting prompts, as shown in the v0 mockup's `prompt-configuration.tsx`.
         *   **Files**: `components/batch/BatchUploadWizard.tsx`, Shadcn `RadioGroup`, `Textarea`, `Label`, `ScrollArea`.
         *   **Instructions (within `BatchUploadWizard.tsx` - Prompts Step Content)**:
@@ -295,10 +295,6 @@
                 *   If failure: Update doc/job status `'failed'` + error, increment batch `failed_count`. **No usage increment.**
     *   **8.3.5: Implement Batch Status Aggregation**: After document loop for a batch, re-query counts. If `completed + failed === total`, update batch status (`'completed'`, `'partially_completed'`, `'failed'`) and `completed_at`.
     *   **8.3.6: Refine AI Action**: Ensure `extractDocumentDataAction` accepts `extractionPrompt`, skips internal usage increment when `invokedByBatchProcessor=true`, links `batch_id` to job, handles `skipClassification` correctly.
-
----
-
-Okay, Engineer. Let's elevate Step 8.4 from an MVP to a polished, production-ready Batch Status UI suitable for a top-tier SaaS application like Ingestio.io. We'll incorporate best practices from the research report and leverage the capabilities of your Shadcn/ui component library and Framer Motion for a smooth, informative, and visually appealing experience.
 
 ---
 

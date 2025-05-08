@@ -1,7 +1,7 @@
 "use client"
 
+import { AlertCircleIcon, FileIcon, FileTextIcon, ImageIcon, XIcon } from "lucide-react"
 import { useState } from "react"
-import { FileIcon, ImageIcon, FileTextIcon, XIcon, AlertCircleIcon } from "lucide-react"
 
 interface FileItem {
   name: string
@@ -106,7 +106,11 @@ export function FileUpload() {
                     )}
                   </div>
                 </div>
-                <button onClick={() => removeFile(index)} className="p-1 rounded-full hover:bg-gray-100">
+                <button 
+                  onClick={() => removeFile(index)} 
+                  className="p-1 rounded-full hover:bg-gray-100 hover:text-black/90"
+                  aria-label={`Remove ${file.name}`}
+                >
                   <XIcon className="h-4 w-4 text-gray-500" />
                 </button>
               </div>

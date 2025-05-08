@@ -26,12 +26,12 @@ export function WizardNav({ currentStep }: WizardNavProps) {
             {currentStep > step.id ? (
               <>
                 <div className="absolute inset-0 top-1/2 -translate-y-1/2 flex items-center" aria-hidden="true">
-                  <div className="h-0.5 w-full bg-primary" />
+                  <div className="h-0.5 w-full bg-black" />
                 </div>
                 <div
-                  className="relative flex h-8 w-8 items-center justify-center rounded-full bg-primary transition-colors duration-300 ease-in-out"
+                  className="relative flex h-8 w-8 items-center justify-center rounded-full bg-black transition-colors duration-300 ease-in-out"
                 >
-                  <Check className="h-5 w-5 text-primary-foreground" aria-hidden="true" />
+                  <Check className="h-5 w-5 text-white" aria-hidden="true" />
                   <span className="sr-only">{step.name} - Completed</span>
                 </div>
               </>
@@ -41,10 +41,10 @@ export function WizardNav({ currentStep }: WizardNavProps) {
                   <div className="h-0.5 w-full bg-gray-200 dark:bg-neutral-700" />
                 </div>
                 <div
-                  className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-primary bg-background transition-colors duration-300 ease-in-out"
+                  className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-black bg-background transition-colors duration-300 ease-in-out"
                   aria-current="step"
                 >
-                  <span className="h-2.5 w-2.5 rounded-full bg-primary" aria-hidden="true" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-black" aria-hidden="true" />
                   <span className="sr-only">{step.name} - Current</span>
                 </div>
               </>
@@ -61,7 +61,7 @@ export function WizardNav({ currentStep }: WizardNavProps) {
               </>
             )}
             <p className={cn("pt-2 text-xs font-medium text-center whitespace-nowrap",
-              currentStep === step.id ? "text-primary" : "text-muted-foreground"
+              currentStep === step.id ? "text-black" : "text-muted-foreground"
             )}>
               {step.name}
             </p>

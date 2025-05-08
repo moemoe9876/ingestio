@@ -1,11 +1,11 @@
 "use client"
 
-import type { Dispatch, SetStateAction } from "react"
-import { FileIcon, ImageIcon, FileTextIcon } from "lucide-react"
-import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Textarea } from "@/components/ui/textarea"
+import { FileIcon, FileTextIcon, ImageIcon } from "lucide-react"
+import type { Dispatch, SetStateAction } from "react"
 
 interface FileItem {
   name: string
@@ -47,18 +47,18 @@ export function PromptConfiguration({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white border rounded-lg p-6">
-        <h2 className="text-lg font-medium mb-4">Prompt Strategy</h2>
+    <div className="space-y-5">
+      <div className="bg-white border rounded-lg p-5">
+        <h2 className="text-lg font-medium mb-3">Prompt Strategy</h2>
 
         <RadioGroup
           value={promptStrategy}
           onValueChange={(value) => setPromptStrategy(value as "global" | "per-document" | "auto-detect")}
-          className="space-y-4"
+          className="space-y-3"
         >
           <div className="flex items-start space-x-2">
             <RadioGroupItem value="global" id="global" className="mt-1" />
-            <div className="grid gap-1.5">
+            <div className="grid gap-1">
               <Label htmlFor="global" className="font-medium">
                 Global Prompt
               </Label>
@@ -68,7 +68,7 @@ export function PromptConfiguration({
 
           <div className="flex items-start space-x-2">
             <RadioGroupItem value="per-document" id="per-document" className="mt-1" />
-            <div className="grid gap-1.5">
+            <div className="grid gap-1">
               <Label htmlFor="per-document" className="font-medium">
                 Per-Document Prompt
               </Label>
@@ -78,7 +78,7 @@ export function PromptConfiguration({
 
           <div className="flex items-start space-x-2">
             <RadioGroupItem value="auto-detect" id="auto-detect" className="mt-1" />
-            <div className="grid gap-1.5">
+            <div className="grid gap-1">
               <Label htmlFor="auto-detect" className="font-medium">
                 Auto-Detect & Prompt
               </Label>
@@ -91,14 +91,14 @@ export function PromptConfiguration({
       </div>
 
       {/* Conditional UI based on selected strategy */}
-      <div className="bg-white border rounded-lg p-6">
+      <div className="bg-white border rounded-lg p-5">
         {promptStrategy === "global" && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div>
               <Label htmlFor="global-prompt" className="text-base font-medium">
                 Enter Global Extraction Prompt
               </Label>
-              <p className="text-sm text-gray-500 mt-1 mb-3">
+              <p className="text-sm text-gray-500 mt-1 mb-2">
                 This prompt will be applied to all documents in the batch.
               </p>
               <Textarea
@@ -106,43 +106,45 @@ export function PromptConfiguration({
                 value={globalPrompt}
                 onChange={(e) => setGlobalPrompt(e.target.value)}
                 placeholder="Extract invoice number, total amount, and due date."
-                className="min-h-[120px]"
+                className="min-h-[50px]"
               />
             </div>
           </div>
         )}
 
         {promptStrategy === "per-document" && (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <h3 className="text-base font-medium">Configure Individual Document Prompts</h3>
             <p className="text-sm text-gray-500">Customize extraction prompts for each document in your batch.</p>
 
-            <ScrollArea className="h-[400px] pr-4">
-              <div className="space-y-6">
-                {files.map((file) => (
-                  <div key={file.name} className="space-y-2 pb-4 border-b last:border-0">
-                    <div className="flex items-center gap-2">
-                      {getFileIcon(file.type)}
-                      <span className="font-medium">{file.name}</span>
+            <div className="relative w-full h-[280px] border rounded-md">
+              <ScrollArea className="h-full w-full">
+                <div className="space-y-4 p-3">
+                  {files.map((file) => (
+                    <div key={file.name} className="space-y-2 pb-3 border-b last:border-0">
+                      <div className="flex items-center gap-2">
+                        {getFileIcon(file.type)}
+                        <span className="font-medium">{file.name}</span>
+                      </div>
+                      <Textarea
+                        value={perDocumentPrompts[file.name] || ""}
+                        onChange={(e) => handlePerDocumentPromptChange(file.name, e.target.value)}
+                        placeholder={`Enter extraction prompt for ${file.name}`}
+                        className="min-h-8"
+                      />
                     </div>
-                    <Textarea
-                      value={perDocumentPrompts[file.name] || ""}
-                      onChange={(e) => handlePerDocumentPromptChange(file.name, e.target.value)}
-                      placeholder={`Enter extraction prompt for ${file.name}`}
-                      className="min-h-[100px]"
-                    />
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
           </div>
         )}
 
         {promptStrategy === "auto-detect" && (
-          <div className="space-y-4 p-4 bg-gray-50 rounded-md">
+          <div className="space-y-3 p-4 bg-gray-50 rounded-md">
             <h3 className="text-base font-medium">Auto-Detect & Prompt</h3>
             <p className="text-sm text-gray-600">
-              IngestIO will automatically detect the document type and apply the best extraction settings. No prompt
+              Ingestio will automatically detect the document type and apply the best extraction settings. No prompt
               needed here.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-50 text-blue-700 rounded-md text-sm">
@@ -163,7 +165,7 @@ export function PromptConfiguration({
                 <path d="M12 8h.01" />
               </svg>
               <p>
-                Our AI will analyze each document, identify its type, and extract relevant information automatically.
+                Our system will analyse each document, identify its type, and extract relevant information automatically.
                 This is ideal for mixed document batches.
               </p>
             </div>

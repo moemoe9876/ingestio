@@ -1,7 +1,7 @@
 "use server"
 
 import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions"
-import BatchUploadWizard from "@/components/batch/batch-upload-wizard"
+import BatchUploadWizard from "@/components/batch/BatchUploadWizard"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { getUserIdOrRedirect } from "@/lib/auth-utils"
 import { AlertCircle } from "lucide-react"
