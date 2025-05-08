@@ -12,6 +12,9 @@ vi.mock('@/lib/auth-utils', () => ({
   getCurrentUser: vi.fn()
 }));
 
+// Define mockLimitSelect before using it in mock
+const mockLimitSelect = vi.fn();
+
 // Mock db and its return values directly
 vi.mock('@/db/db', () => {
   // Mock for update operations
@@ -20,8 +23,6 @@ vi.mock('@/db/db', () => {
   const mockSetUpdate = vi.fn(() => ({ where: mockWhereUpdate }));
   const mockUpdate = vi.fn(() => ({ set: mockSetUpdate }));
   
-  // Mock for select operations
-  const mockLimitSelect = vi.fn();
   const mockWhereSelect = vi.fn(() => ({ limit: mockLimitSelect }));
   const mockFromSelect = vi.fn(() => ({ where: mockWhereSelect }));
   const mockSelect = vi.fn(() => ({ from: mockFromSelect }));
@@ -46,61 +47,65 @@ vi.mock('@/lib/analytics/server', () => ({
 
 describe('Profile and User Update Actions', () => {
   const testUserId = 'user_123';
-  const mockReturningFn = vi.fn();
+  const mockUser = {
+    userId: testUserId,
+    email: 'test@example.com',
+    fullName: 'Test User',
+    avatarUrl: null,
+    metadata: null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+  const mockReturningFn = vi.fn(); // For updates
   
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getCurrentUser).mockResolvedValue(testUserId);
     
-    // Set up mocks for db update operations
-    mockReturningFn.mockResolvedValue([{ userId: testUserId }]);
-    
-    // Mock the db chain
+    // Default for db.select()...limit(1) used by getUserByIdAction
+    // This ensures getUserByIdAction receives an array
+    mockLimitSelect.mockResolvedValue([mockUser]); 
+
+    // Set up mocks for db update operations (used by other actions in this file)
+    mockReturningFn.mockResolvedValue([{ userId: testUserId }]); 
     const mockWhere = vi.fn().mockReturnValue({ returning: mockReturningFn });
     const mockSet = vi.fn().mockReturnValue({ where: mockWhere });
-    const mockUpdate = vi.fn().mockReturnValue({ set: mockSet });
-    
-    // @ts-ignore - Override the mock implementation
-    db.update = mockUpdate;
-    
-    // Mock getUserByIdAction directly with spyOn
-    vi.spyOn(userActions, 'getUserByIdAction').mockResolvedValue({
-      userId: testUserId,
-      email: 'test@example.com',
-      fullName: 'Test User',
-      avatarUrl: null,
-      metadata: null,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
+    const mockUpdateFn = vi.fn().mockReturnValue({ set: mockSet });
+    // @ts-ignore
+    db.update = mockUpdateFn;
+
+    // No longer mocking getUserByIdAction directly here,
+    // as we want to test getCurrentUserDataAction's interaction with the *actual* getUserByIdAction,
+    // which relies on the db.select mock we just configured.
+    // vi.spyOn(userActions, 'getUserByIdAction').mockResolvedValue(mockUser); 
   });
 
   describe('getCurrentUserDataAction', () => {
-    test('should return an ActionState response', async () => {
+    test('should return an ActionState response and user data if found', async () => {
+      // mockLimitSelect is already set to return [mockUser] in beforeEach
       const result = await userActions.getCurrentUserDataAction();
 
-      // Result will have isSuccess property regardless of its value
-      expect(result).toHaveProperty('isSuccess');
-      expect(result).toHaveProperty('message');
+      expect(result.isSuccess).toBe(true);
+      expect(result.message).toBe('User data retrieved successfully');
+      expect(result.data).toEqual(mockUser);
     });
 
     test('should handle user not found case', async () => {
-      vi.spyOn(userActions, 'getUserByIdAction').mockResolvedValue(undefined);
+      mockLimitSelect.mockResolvedValue([]); // Simulate user not found
       
       const result = await userActions.getCurrentUserDataAction();
       
       expect(result.isSuccess).toBe(false);
-      // Use a more generic expectation
-      expect(typeof result.message).toBe('string');
+      expect(result.message).toBe('User not found in database');
     });
 
-    test('should handle errors properly', async () => {
-      vi.spyOn(userActions, 'getUserByIdAction').mockRejectedValue(new Error('Database error'));
+    test('should handle errors properly when getUserByIdAction fails', async () => {
+      mockLimitSelect.mockRejectedValue(new Error('Database error')); // Simulate DB error during select
       
       const result = await userActions.getCurrentUserDataAction();
       
       expect(result.isSuccess).toBe(false);
-      expect(result.message).toContain('Failed to retrieve');
+      expect(result.message).toBe('Failed to retrieve user data'); // This is the message from getCurrentUserDataAction's catch block
     });
   });
 

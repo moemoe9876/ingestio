@@ -22,8 +22,8 @@ const mockDelete = vi.fn();
 const mockSingle = vi.fn();
 const mockEq = vi.fn();
 const mockCreateSignedUrl = vi.fn();
-const mockSelectAll = vi.fn(() => ({ eq: mockSelectAll, order: mockSelectAll, limit: mockSelectAll, maybeSingle: mockMaybeSingle }));
 const mockMaybeSingle = vi.fn();
+const mockSelectAll = vi.fn(() => ({ eq: mockSelectAll, order: mockSelectAll, limit: mockSelectAll, maybeSingle: mockMaybeSingle }));
 
 vi.mock('@/lib/supabase/server', () => ({
   createServerClient: vi.fn(() => ({
@@ -56,6 +56,37 @@ vi.mock('@/lib/supabase/server', () => ({
         createSignedUrl: mockCreateSignedUrl
       }))
     }
+  })),
+  createAdminClient: vi.fn(() => ({
+    storage: {
+      from: vi.fn(() => ({
+        remove: mockRemove,
+        createSignedUrl: mockCreateSignedUrl
+      }))
+    },
+    from: vi.fn((table) => {
+      if (table === 'documents') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                single: mockSingle
+              })
+            })
+          }),
+          delete: () => ({
+            eq: () => ({
+              eq: mockEq
+            })
+          })
+        };
+      } else if (table === 'extracted_data') {
+        return {
+          select: mockSelectAll
+        };
+      }
+      return { select: () => ({}) };
+    })
   }))
 }));
 
