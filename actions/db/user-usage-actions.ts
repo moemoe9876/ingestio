@@ -212,10 +212,10 @@ export async function getCurrentUserUsageAction(
 ): Promise<ActionState<SelectUserUsage>> {
   try {
     const now = new Date();
-    console.log(`[getCurrentUserUsageAction] Looking for usage record for userId: ${userId}, current date: ${now.toISOString()}`);
-    
-    // Find usage record that contains the current date
-    const [usage] = await db
+    console.log(`[getCurrentUserUsageAction] Validating usage for userId: ${userId}, reference date: ${now.toISOString()}`);
+
+    // 1. Attempt to fetch an existing usage record covering "now"
+    const [existingUsage] = await db
       .select()
       .from(userUsageTable)
       .where(
@@ -225,32 +225,109 @@ export async function getCurrentUserUsageAction(
           gte(userUsageTable.billingPeriodEnd, now)
         )
       )
-      // If multiple overlapping records exist (e.g., after mid-period subscription upgrade),
-      // choose the one with the most recent billingPeriodStart to ensure we always
-      // pick the record that reflects the **current** active subscription tier.
-      .orderBy(desc(userUsageTable.billingPeriodStart))
+      .orderBy(desc(userUsageTable.billingPeriodStart)) // Prefer the most recent period if multiple (shouldn't happen)
       .limit(1);
-    
-    console.log(`[getCurrentUserUsageAction] Found usage record:`, usage ? 
-      `ID: ${usage.id}, period: ${usage.billingPeriodStart.toISOString()} to ${usage.billingPeriodEnd.toISOString()}, processed: ${usage.pagesProcessed}, limit: ${usage.pagesLimit}` : 
-      'No record found');
-    
-    if (!usage) {
-      // No usage record found for current period - initialize one
-      console.log(`[getCurrentUserUsageAction] No current usage record found, initializing...`);
-      return initializeUserUsageAction(userId);
+
+    // 2. Retrieve authoritative subscription data from KV / Stripe to validate period & limit
+    const subscriptionResult = await getUserSubscriptionDataKVAction(userId);
+
+    if (!subscriptionResult.isSuccess) {
+      console.error(`[getCurrentUserUsageAction] Failed to retrieve subscription data for user ${userId}: ${subscriptionResult.message}`);
+      // If we already have a usage record, return it (better than blocking the request)
+      // but log that it might be stale or based on defaults.
+      if (existingUsage) {
+        console.warn(`[getCurrentUserUsageAction] Returning existing usage record ID ${existingUsage.id} for user ${userId} despite KV failure. Data might be stale.`);
+        return {
+          isSuccess: true,
+          message: `Retrieved user usage with potentially stale subscription data (${subscriptionResult.message})`,
+          data: existingUsage,
+        };
+      }
+      // Otherwise propagate failure so caller can decide
+      return {
+        isSuccess: false,
+        message: `Failed to get authoritative subscription data: ${subscriptionResult.message}`,
+      };
     }
-    
+
+    // 3. Derive authoritative period & limits using the same logic as initializeUserUsageAction
+    const referenceDate = now; // For clarity, using 'now' as the reference for period calculation
+    const subData = subscriptionResult.data;
+    let authoritativeStart: Date;
+    let authoritativeEnd: Date;
+    let authoritativeTier: SubscriptionTier = "starter"; // Default tier
+
+    if (
+      subData && // Ensure subData is not null/undefined
+      subData.status === "active" &&
+      subData.currentPeriodStart &&
+      subData.currentPeriodEnd
+    ) {
+      const stripeStart = new Date(subData.currentPeriodStart * 1000);
+      const stripeEnd = new Date(subData.currentPeriodEnd * 1000);
+
+      // Check if the Stripe period is current (e.g., encompasses 'referenceDate')
+      if (stripeStart <= referenceDate && stripeEnd >= referenceDate) {
+        authoritativeStart = stripeStart;
+        authoritativeEnd = stripeEnd;
+        authoritativeTier = (subData.planId as SubscriptionTier) || "starter";
+        console.log(`[getCurrentUserUsageAction] User ${userId}: Using Stripe authoritative period: ${authoritativeStart.toISOString()} - ${authoritativeEnd.toISOString()}, Tier: ${authoritativeTier}`);
+      } else {
+        // Stripe data present but not for the current reference period, fall back to calculated UTC month
+        console.warn(`[getCurrentUserUsageAction] User ${userId}: Stripe period (${stripeStart.toISOString()} - ${stripeEnd.toISOString()}) does not cover reference date ${referenceDate.toISOString()}. Falling back to UTC month.`);
+        authoritativeStart = getUTCMonthStart(referenceDate);
+        authoritativeEnd = getUTCMonthEnd(referenceDate);
+        // Tier might still be derivable from subscriptionResult if planId is there
+        authoritativeTier = (subData.planId as SubscriptionTier) || "starter";
+      }
+    } else {
+      // No active Stripe subscription or missing period data, fall back to calculated UTC month
+      console.log(`[getCurrentUserUsageAction] User ${userId}: No active Stripe subscription or period data. Using calculated UTC month based on ${referenceDate.toISOString()}.`);
+      authoritativeStart = getUTCMonthStart(referenceDate);
+      authoritativeEnd = getUTCMonthEnd(referenceDate);
+      authoritativeTier = "starter"; // Default to starter if no subscription info
+    }
+
+    const authoritativeLimit =
+      RATE_LIMIT_TIERS[authoritativeTier]?.pagesPerMonth ?? // Use ?? for nullish coalescing
+      RATE_LIMIT_TIERS["starter"].pagesPerMonth;
+    console.log(`[getCurrentUserUsageAction] User ${userId}: Authoritative Tier: ${authoritativeTier}, Authoritative Limit: ${authoritativeLimit}`);
+
+    // 4. Determine if we need to (re)initialize
+    // Ensure existingUsage times are compared correctly (getTime())
+    const needsRefresh =
+      !existingUsage ||
+      (existingUsage.billingPeriodStart instanceof Date && existingUsage.billingPeriodStart.getTime() !== authoritativeStart.getTime()) ||
+      (existingUsage.billingPeriodEnd instanceof Date && existingUsage.billingPeriodEnd.getTime() !== authoritativeEnd.getTime()) ||
+      existingUsage.pagesLimit !== authoritativeLimit;
+
+    if (needsRefresh) {
+      console.log(`[getCurrentUserUsageAction] Usage record for user ${userId} is out-of-date, missing, or limit differs. Triggering initializeUserUsageAction().`);
+      console.log(`[getCurrentUserUsageAction] Details: Existing Record Present: ${!!existingUsage}`);
+      if (existingUsage) {
+        console.log(`[getCurrentUserUsageAction] Existing Start: ${existingUsage.billingPeriodStart?.toISOString()}, Authoritative Start: ${authoritativeStart.toISOString()}`);
+        console.log(`[getCurrentUserUsageAction] Existing End: ${existingUsage.billingPeriodEnd?.toISOString()}, Authoritative End: ${authoritativeEnd.toISOString()}`);
+        console.log(`[getCurrentUserUsageAction] Existing Limit: ${existingUsage.pagesLimit}, Authoritative Limit: ${authoritativeLimit}`);
+      }
+      // Pass the referenceDate (now) to initializeUserUsageAction to ensure it uses the same context
+      // if it needs to calculate month start/end due to missing Stripe data.
+      return initializeUserUsageAction(userId, { startDate: now });
+    }
+
+    // 5. Everything looks good – return existing record
+    console.log(`[getCurrentUserUsageAction] Returning up-to-date usage record ID ${existingUsage.id} for user ${userId}.`);
     return {
       isSuccess: true,
       message: "Retrieved user usage successfully",
-      data: usage
+      data: existingUsage,
     };
   } catch (error) {
-    console.error("Error getting user usage:", error);
+    console.error("[getCurrentUserUsageAction] Error getting user usage:", error);
+    // Ensure a structured error response
+    const errorMessage = error instanceof Error ? error.message : "Unknown error getting user usage";
     return {
       isSuccess: false,
-      message: error instanceof Error ? error.message : "Unknown error getting user usage"
+      message: errorMessage,
     };
   }
 }

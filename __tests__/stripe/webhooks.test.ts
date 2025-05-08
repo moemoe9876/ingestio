@@ -146,9 +146,8 @@ describe("Stripe Webhook Processing", () => {
       // Setup processStripeWebhook mock for invoice event
       (processStripeWebhook as Mock).mockResolvedValue({
         success: true,
-        message: "Successfully processed invoice.payment_succeeded event",
         data: {
-          eventType: "invoice.payment_succeeded",
+          eventType: "invoice.paid",
           customerId: mockCustomerId,
           processed: true,
           syncedData: {
@@ -165,19 +164,13 @@ describe("Stripe Webhook Processing", () => {
         }
       });
 
-      // Setup profile lookup mock
+      // Setup profile lookup mock to ensure userId is available
       (getProfileByStripeCustomerIdAction as Mock).mockResolvedValue({
         isSuccess: true,
-        message: "Profile retrieved",
-        data: {
-          userId: mockUserId,
-          stripeCustomerId: mockCustomerId,
-          stripeSubscriptionId: mockSubscriptionId,
-          membership: "plus"
-        }
+        data: { userId: mockUserId, stripeCustomerId: mockCustomerId, stripeSubscriptionId: mockSubscriptionId, membership: "plus" }
       });
 
-      // Setup profile update mock
+      // Setup profile update mock (though not strictly necessary for this test's core assertion on initializeUserUsageAction)
       (updateProfileByStripeCustomerIdAction as Mock).mockResolvedValue({
         isSuccess: true,
         message: "Profile updated",
@@ -189,12 +182,33 @@ describe("Stripe Webhook Processing", () => {
         }
       });
 
+      // Setup initializeUserUsageAction mock
+      const mockBillingStart = new Date();
+      const mockBillingEnd = new Date(mockBillingStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      (initializeUserUsageAction as Mock).mockResolvedValue({
+        isSuccess: true,
+        message: "Usage initialized/updated successfully for new period",
+        data: { 
+          id: 'new-usage-record-id',
+          userId: mockUserId,
+          billingPeriodStart: mockBillingStart,
+          billingPeriodEnd: mockBillingEnd,
+          pagesProcessed: 0,
+          pagesLimit: 250,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      });
+
       // Call the action
       const result = await processStripeWebhookAction(invoiceBody, mockSignature);
 
       // Assertions
       expect(processStripeWebhook).toHaveBeenCalledWith(invoiceBody, mockSignature);
       expect(getProfileByStripeCustomerIdAction).toHaveBeenCalledWith(mockCustomerId);
+      
+      expect(initializeUserUsageAction).toHaveBeenCalledWith(mockUserId);
       
       expect(result.isSuccess).toBe(true);
     });
@@ -238,17 +252,20 @@ describe("Stripe Webhook Processing", () => {
       const result = await processStripeWebhookAction(mockRawBody, mockSignature);
 
       // Assertions
-      expect(updateProfileByStripeCustomerIdAction).toHaveBeenNthCalledWith(2, mockCustomerId, {
+      expect(updateProfileByStripeCustomerIdAction).toHaveBeenCalledTimes(1); // Should only be called once
+      expect(updateProfileByStripeCustomerIdAction).toHaveBeenCalledWith(mockCustomerId, {
         membership: "starter", // Should downgrade to free tier
         stripeSubscriptionId: null
       });
       
       // Should track cancellation event
       expect(trackServerEvent).toHaveBeenCalledWith(
-        expect.stringContaining("stripe.subscription.cancelled.synced"),
+        "subscription_changed",
         mockUserId,
         expect.objectContaining({
-          previousSubscriptionId: mockSubscriptionId,
+          newPlan: "starter",
+          customerId: mockCustomerId,
+          subscriptionId: "N/A",
         })
       );
       
@@ -273,18 +290,22 @@ describe("Stripe Webhook Processing", () => {
         }
       });
 
-      // Setup profile action to return no profile
-      (updateProfileByStripeCustomerIdAction as Mock).mockResolvedValue({
-        isSuccess: false,
-        message: "Profile not found"
+      // Setup profile lookup to return no profile
+      (getProfileByStripeCustomerIdAction as Mock).mockResolvedValue({
+        isSuccess: false, // Or true, but with no data.userId
+        message: "Profile not found during get"
       });
+
+      // Ensure update is not called if get fails (it's a separate mock for other tests)
+      (updateProfileByStripeCustomerIdAction as Mock).mockClear(); // Clear any previous calls
 
       // Call the action
       const result = await processStripeWebhookAction(mockRawBody, mockSignature);
 
       // Assertions
       expect(result.isSuccess).toBe(true);
-      expect(updateProfileByStripeCustomerIdAction).toHaveBeenCalledWith(mockCustomerId, {});
+      expect(getProfileByStripeCustomerIdAction).toHaveBeenCalledWith(mockCustomerId);
+      expect(updateProfileByStripeCustomerIdAction).not.toHaveBeenCalled();
       expect(trackServerEvent).not.toHaveBeenCalled(); // No user ID, so no event tracking
     });
 
@@ -307,7 +328,7 @@ describe("Stripe Webhook Processing", () => {
     });
 
     test("should handle errors in profile update", async () => {
-      // Setup processStripeWebhook mock
+      // Setup processStripeWebhook mock for a successful event processing
       (processStripeWebhook as Mock).mockResolvedValue({
         success: true,
         message: "Successfully processed event",
@@ -324,24 +345,26 @@ describe("Stripe Webhook Processing", () => {
         }
       });
 
-      // Setup profile action to return user but throw on update
-      (updateProfileByStripeCustomerIdAction as Mock)
-        .mockResolvedValueOnce({
-          isSuccess: true,
-          message: "Profile found",
-          data: {
-            userId: mockUserId,
-            stripeCustomerId: mockCustomerId,
-          }
-        })
-        .mockRejectedValueOnce(new Error("Database error"));
+      // Setup getProfileByStripeCustomerIdAction to return a user successfully
+      (getProfileByStripeCustomerIdAction as Mock).mockResolvedValueOnce({
+        isSuccess: true,
+        message: "Profile found",
+        data: {
+          userId: mockUserId,
+          stripeCustomerId: mockCustomerId,
+        }
+      });
+
+      // Setup updateProfileByStripeCustomerIdAction to throw an error
+      (updateProfileByStripeCustomerIdAction as Mock).mockRejectedValueOnce(new Error("Database error on update"));
 
       // Call the action
       const result = await processStripeWebhookAction(mockRawBody, mockSignature);
 
       // Assertions
+      // If updateProfile... throws, the main catch block in processStripeWebhookAction handles it.
       expect(result.isSuccess).toBe(false);
-      expect(result.message).toContain("Database error");
+      expect(result.message).toContain("Error processing webhook: Database error on update");
     });
 
     test("should handle errors in usage reset", async () => {
@@ -359,12 +382,12 @@ describe("Stripe Webhook Processing", () => {
         }
       });
 
-      // Setup processStripeWebhook mock
+      // Setup processStripeWebhook mock for an invoice.payment_succeeded event
       (processStripeWebhook as Mock).mockResolvedValue({
         success: true,
         message: "Successfully processed event",
         data: {
-          eventType: "invoice.payment_succeeded",
+          eventType: "invoice.paid",
           customerId: mockCustomerId,
           processed: true,
           syncedData: {
@@ -378,14 +401,21 @@ describe("Stripe Webhook Processing", () => {
         }
       });
 
-      // Setup profile action to return user
-      (updateProfileByStripeCustomerIdAction as Mock).mockResolvedValue({
+      // Setup getProfileByStripeCustomerIdAction to return a user successfully
+      (getProfileByStripeCustomerIdAction as Mock).mockResolvedValueOnce({
         isSuccess: true,
         message: "Profile found",
         data: {
           userId: mockUserId,
           stripeCustomerId: mockCustomerId,
         }
+      });
+      
+      // Setup updateProfileByStripeCustomerIdAction to succeed
+      (updateProfileByStripeCustomerIdAction as Mock).mockResolvedValueOnce({
+        isSuccess: true,
+        message: "Profile updated successfully",
+        data: { userId: mockUserId, membership: "plus", stripeSubscriptionId: mockSubscriptionId }
       });
 
       // Setup initializeUserUsageAction to fail
@@ -424,7 +454,7 @@ describe("Stripe Webhook Processing", () => {
 
       // Assertions
       expect(result.isSuccess).toBe(true);
-      expect(result.message).toContain("Event type does not require subscription sync");
+      expect(result.message).toBe("Webhook received but no action taken");
       expect(updateProfileByStripeCustomerIdAction).not.toHaveBeenCalled();
       expect(initializeUserUsageAction).not.toHaveBeenCalled();
     });

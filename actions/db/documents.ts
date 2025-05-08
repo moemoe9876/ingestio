@@ -87,17 +87,36 @@ export async function uploadDocumentAction(
     const actualPageCount = await getServerSidePageCount(fileBuffer, fileData.type);
 
     // 5. Quota check (Now using actualPageCount)
-    const quotaResult = await checkUserQuotaAction(userId, actualPageCount)
-    if (!quotaResult.isSuccess || !quotaResult.data?.hasQuota) {
-      // Consider deleting the uploaded file if quota check fails after upload
-      // For simplicity now, we just return the error.
-      // await deleteFileFromStorage('documents', storagePath); // Example cleanup
-      return {
-        isSuccess: false,
-        message: "Page quota exceeded", 
-        error: "403" 
-      }
+    const quotaResult = await checkUserQuotaAction(userId, actualPageCount);
+
+    // First, check if the quota check action itself failed (e.g., DB error during init)
+    if (!quotaResult.isSuccess) {
+        // Propagate the actual error message from the failing action
+        console.error(`Quota check action failed for user ${userId}: ${quotaResult.message}`);
+        // Consider deleting the uploaded file here as well, as processing cannot continue
+        // await deleteFileFromStorage('documents', storagePath); // Example cleanup
+        return {
+            isSuccess: false,
+            message: quotaResult.message || "Failed to verify user quota due to an internal error.", // Use specific message
+            error: "QUOTA_CHECK_FAILED" // More specific error code if desired
+        };
     }
+
+    // If the action succeeded, now check if the user actually has enough quota
+    if (!quotaResult.data?.hasQuota) {
+        // Now we know the reason is specifically insufficient quota
+        console.log(`Quota exceeded for user ${userId}. Required: ${actualPageCount}, Remaining: ${quotaResult.data?.remaining}`);
+        // Consider deleting the uploaded file
+        // await deleteFileFromStorage('documents', storagePath); // Example cleanup
+        return {
+            isSuccess: false,
+            message: `Page quota exceeded. Required: ${actualPageCount}, Remaining: ${quotaResult.data?.remaining ?? 0}.`, // More informative message
+            error: "403" // Forbidden due to quota
+        };
+    }
+
+    // If we reach here, the quota check passed successfully.
+    console.log(`Quota check passed for user ${userId}. Proceeding with DB insert.`);
 
     // 6. Insert document record (Using actualPageCount)
     const documentData: InsertDocument = {
@@ -293,7 +312,8 @@ export async function fetchDocumentForReviewAction(
       status: documentData.status,
       createdAt: new Date(documentData.created_at),
       updatedAt: new Date(documentData.updated_at),
-      batchId: (documentData as any).batch_id ?? null // Cast to any to bypass type check
+      batchId: (documentData as any).batch_id ?? null, // Cast to any to bypass type check
+      extractionPrompt: (documentData as any).extraction_prompt ?? null
     }
 
     // 3. Generate signed URL for the document
@@ -520,6 +540,7 @@ export async function fetchUserDocumentsAction({
       createdAt: new Date(doc.created_at),
       updatedAt: doc.updated_at ? new Date(doc.updated_at) : new Date(doc.created_at),
       batchId: (doc as any).batch_id ?? null, // Cast to any to bypass type check
+      extractionPrompt: (doc as any).extraction_prompt ?? null,
     }))
 
     return {
