@@ -186,7 +186,7 @@
                 *   `promptStrategy === 'global'` and `globalPrompt` is empty.
                 *   `promptStrategy === 'per_document'` and any valid file lacks a non-empty prompt in `perDocPrompts`.
 
-    *   **8.1.4: Implement Step 3: Review & Submit UI & Logic**:
+    *  [x] **8.1.4: Implement Step 3: Review & Submit UI & Logic**:
         *   **Action**: Display a summary of the batch configuration and handle submission, as shown in the v0 mockup's `batch-review.tsx`.
         *   **Files**: `components/batch/BatchUploadWizard.tsx`, `actions/batch/batchActions.ts`, Shadcn `Card`, `Collapsible`.
         *   **Instructions (within `BatchUploadWizard.tsx` - Review Step Content)**:
@@ -207,167 +207,300 @@
             4.  **Informational Note:** Display message with `InfoCircledIcon`: "Once submitted, this batch will be processed according to your plan settings. You'll receive a notification when processing is complete."
             5.  **Submit Button:** "Submit Batch" button, bound to `handleSubmitBatch` function. Disable if `isSubmitting`.
 
-    *   **8.1.5: Update Sidebar Navigation**:
+    *  [x] **8.1.5: Update Sidebar Navigation**:
         *   **Action**: Add a link to `/dashboard/batch-upload` in `components/utilities/app-sidebar.tsx`.
         *   **Files**: `components/utilities/app-sidebar.tsx`.
         *   **Instructions**: Add a `SidebarMenuItem` with the `Layers` icon (or a more specific batch icon if available) linking to the new page. Ensure it's placed logically within the navigation structure.
 
 ---
 
-**Step 8.2: Implement Batch Creation Server Action**
+Okay, let's refine the implementation plan starting from Step 8.2, incorporating the detailed requirements, UI insights from the screenshots, and clarifying the action flow.
 
-*   **Task**: Develop `createBatchUploadAction` for secure, atomic batch creation, including validation, file upload, server-side page counting, and prompt association.
-*   **Goal**: Reliably persist batch metadata and uploaded documents, enforcing business rules and preparing for background processing.
-*   **Modules**:
-    *   **8.2.1: Define Action & Validation**:
-        *   **Action**: Create/update `createBatchUploadAction` in `actions/batch/batchActions.ts`.
-        *   **Files**: `actions/batch/batchActions.ts`, `actions/stripe/sync-actions.ts`, `lib/auth-utils.ts`, `lib/config/subscription-plans.ts`, `zod`.
-        *   **Instructions**:
-            1.  `"use server"`. Get `userId`. Extract `FormData` fields. Parse `perDocPromptsMap` if present.
-            2.  **Fetch Subscription (KV):** Get `planId`/`status`. Handle errors.
-            3.  **Validate Tier/Limits:** Determine `tier`. Check eligibility (`planId`, `status`). Check `files.length` against `batchLimit`. Validate `promptStrategy` and associated prompt data (e.g., `globalPrompt` required for 'global'). Return failure `ActionState` on validation errors.
-            4.  **Server-Side File Validation (Security):** Loop through `files` and validate MIME type against allowlist (PDF, JPG, PNG) and size against `maxFileSize`. Aggregate errors. Return failure `ActionState` if any file is invalid (Report Sec 4.4).
-    *   **8.2.2: Implement Quota & Rate Limiting**:
-        *   **Action**: Perform pre-transaction checks.
-        *   **Files**: `actions/batch/batchActions.ts`, `lib/rate-limiting/limiter.ts`, `actions/db/user-usage-actions.ts`.
-        *   **Instructions**:
-            1.  Call `checkRateLimit(userId, tier, 'batch_upload')`. Handle failure.
-            2.  **Preliminary Quota Check:** Call `checkUserQuotaAction(userId, files.length)`. Handle failure.
-    *   **8.2.3: Implement File Processing & DB Transaction**:
-        *   **Action**: Atomically upload files, count pages, determine prompts, create DB records.
-        *   **Files**: `actions/batch/batchActions.ts`, `lib/supabase/storage-utils.ts`, `db/db.ts`, schema files, `lib/utils/document-utils.ts`, `uuid`.
-        *   **Instructions**:
-            *   `db.transaction(async (tx) => { ... })`.
-            *   Inside transaction:
-                *   Create `extraction_batches` record (using `tx`): `userId`, `name`, `prompt_strategy`, `extraction_prompt` (only if global), `status: 'pending_upload'`. Get `newBatchId`.
-                *   Init counters/arrays: `totalBatchPages = 0`, `successCount = 0`, `failCount = 0`, `docInserts = []`.
-                *   Loop `files` (with index `i`):
-                    *   `try...catch` per file.
-                    *   Read `file` to `Buffer`.
-                    *   Generate unique filename using `uuidv4()`. Define `storagePath` (`batches/{userId}/{newBatchId}/{uuid}-{originalFilename}`).
-                    *   Upload: `uploadResult = await uploadToStorage(...)`. If error, `failCount++`, log, `continue`.
-                    *   Page Count: `pageCount = await getServerSidePageCount(...)`. If error, `failCount++`, log, `continue`.
-                    *   Add `pageCount` to `totalBatchPages`.
-                    *   Determine `effectivePrompt` based on `promptStrategy` and `perDocPromptsMap[file.name]`. If 'per_document' and prompt missing, `failCount++`, log, `continue`.
-                    *   Prepare `documents` insert data: `userId`, `batch_id: newBatchId`, `pageCount`, `extraction_prompt: effectivePrompt`, `status: 'uploaded'`, other metadata. Add to `docInserts` array.
-                    *   `successCount++`.
-                    *   On error in loop: catch, `failCount++`, log, `continue`.
-                *   If `successCount > 0`, bulk insert documents: `await tx.insert(documentsTable).values(docInserts)`.
-                *   If `successCount === 0` and `files.length > 0`, update batch status to `'failed'` (using `tx`), throw error "All files failed...".
-                *   Else: Update `extraction_batches` (using `tx`): `status: 'queued'`, `document_count: successCount`, `failed_count: failCount`, `total_pages: totalBatchPages`.
-            *   Return `newBatchId`.
-    *   **8.2.4: Finalize Action**:
-        *   **Action**: Handle post-transaction tasks.
-        *   **Files**: `actions/batch/batchActions.ts`, `lib/analytics/server.ts`, `next/cache`.
-        *   **Instructions**:
-            *   After success: `trackServerEvent(...)`, `revalidatePath(...)`. Return success `ActionState`.
-            *   Top-level `try...catch`: On transaction error, log. If `batchId` exists, attempt `UPDATE extraction_batches SET status = 'failed' ...`. Return failure `ActionState`.
+**Clarification on Action Files:**
+
+*   You are correct. `actions/batch/batchActions.ts` will be the primary file for user-initiated batch operations (creating the batch, fetching batch lists/details).
+*   `actions/ai/extraction-actions.ts` will remain the core logic for processing a *single* document's extraction via the AI. The background batch processor will *call* this action for each document in the batch.
+*   `actions/batch/batch-extraction-actions.ts` is indeed redundant for this flow and should be removed or repurposed.
 
 ---
 
-**Step 8.3: Implement Background Processing Logic (MVP Focus)**
+**Redesigned Batch Upload Implementation Plan (Continued)**
 
-*   **Task**: Create Cron + API Route to process queued documents using the correct prompt and accurate quota checks.
-*   **Goal**: Reliably execute AI extraction for batch documents, update statuses, and manage usage.
-*   **Modules**:
-    *   **8.3.1: Configure Vercel Cron Job**: Define schedule (e.g., `*/5 * * * *`) targeting `/api/batch-processor` in `vercel.json`. Set `CRON_SECRET`.
-    *   **8.3.2: Create Secure API Route**: Implement `/api/batch-processor/route.ts`. Verify `Authorization: Bearer ${CRON_SECRET}`.
-    *   **8.3.3: Implement Batch/Document Fetching & Locking**:
-        *   **Action**: Query processable items with locking.
-        *   **Files**: `app/api/batch-processor/route.ts`, schema files, `db/db.ts`.
-        *   **Instructions**:
-            1.  Query `extraction_batches` for `status = 'queued'`, limit (e.g., 5).
-            2.  Loop batches:
-                *   Atomic update: `UPDATE ... SET status = 'processing' WHERE id = :batchId AND status = 'queued' RETURNING *`. If no row, skip. Store `batch`.
-                *   Query associated `documents` where `batch_id = batch.id` AND `status = 'uploaded'`, limit (e.g., 20). Select needed fields incl. `page_count`, `extraction_prompt`.
-    *   **8.3.4: Implement Document Processing Loop**:
-        *   **Action**: Process each document: check quota, resolve prompt, call AI, update usage.
-        *   **Files**: `app/api/batch-processor/route.ts`, `actions/ai/extraction-actions.ts`, `actions/db/user-usage-actions.ts`, `prompts/classification.ts`, `lib/utils/prompt-utils.ts`.
-        *   **Instructions**:
-            1.  Loop `documents`:
-            2.  **Quota Check:** `quotaResult = await checkUserQuotaAction(document.userId, document.pageCount)`.
-            3.  If quota fails: Update doc/job status `'failed'`, increment batch `failed_count`, `continue`. **No usage increment.**
-            4.  If quota passes:
-                *   Update doc status `'processing'`.
-                *   **Resolve Prompt (`finalPrompt`)**: Implement logic based on `batch.prompt_strategy` and `document.extraction_prompt`. If 'auto' and prompt is null, download file, call `classifyDocument`, get default prompt via `getDefaultPromptForType`, update `document.extraction_prompt` in DB. Handle classification errors.
-                *   Call AI: `aiResult = await extractDocumentDataAction({ documentId: document.id, extractionPrompt: finalPrompt, ... }, true)`.
-                *   If success: Update doc/job status `'completed'`, increment batch `completed_count`. **Increment Usage:** `await incrementPagesProcessedAction(document.userId, document.pageCount)`.
-                *   If failure: Update doc/job status `'failed'` + error, increment batch `failed_count`. **No usage increment.**
-    *   **8.3.5: Implement Batch Status Aggregation**: After document loop for a batch, re-query counts. If `completed + failed === total`, update batch status (`'completed'`, `'partially_completed'`, `'failed'`) and `completed_at`.
-    *   **8.3.6: Refine AI Action**: Ensure `extractDocumentDataAction` accepts `extractionPrompt`, skips internal usage increment when `invokedByBatchProcessor=true`, links `batch_id` to job, handles `skipClassification` correctly.
+**(Step 8.0 & 8.1 - Database Schema & UI Wizard - Assumed Completed as per previous plan)**
 
 ---
 
-**Step 8.4: Implement Polished Batch Status UI**
+**Step 8.2: Implement Batch Creation Server Action (`actions/batch/batchActions.ts`)**
 
-*   **Task**: Build sophisticated frontend pages for users to comprehensively monitor their batch jobs, view detailed progress, access results, and manage batches.
-*   **Goal**: Provide a clear, intuitive, visually appealing, and informative interface for batch monitoring that aligns with modern SaaS standards and enhances user trust and productivity.
-*   **Modules**:
+*   **Task**: Develop the `createBatchUploadAction` server action. This action is triggered when the user clicks "Submit Batch" in the UI Wizard (Step 3). It handles the initial setup of the batch job, including validation, file uploads, server-side page counting, and database record creation, before handing off to the background processor.
+*   **Goal**: Securely and atomically create the batch record and associated document records, validate user permissions and limits, upload files to storage, accurately count pages, associate the correct prompts, and queue the batch for background processing.
+*   **File**: `actions/batch/batchActions.ts`
+*   **Inputs**: `formData: FormData` (containing `files: File[]`, `batchName?: string`, `promptStrategy: 'global' | 'per_document' | 'auto'`, `globalPrompt?: string`, `perDocPrompts?: string` (JSON stringified `Record<string, string>`)).
+*   **Outputs**: `ActionState<{ batchId: string }>` on success, or error `ActionState`.
+*   **Detailed Steps**:
+    1.  **`"use server"` Directive**: Mark the file accordingly.
+    2.  **Authentication**: Call `getCurrentUser()` from `lib/auth-utils.ts` to get `userId`. Return error `ActionState` if unauthorized.
+    3.  **FormData Parsing**:
+        *   Extract `files` array (`formData.getAll("files")`).
+        *   Extract `batchName` (optional).
+        *   Extract `promptStrategy`.
+        *   Conditionally extract `globalPrompt` if `promptStrategy === 'global'`.
+        *   Conditionally extract and `JSON.parse` `perDocPrompts` if `promptStrategy === 'per_document'`. Handle potential parsing errors.
+    4.  **Subscription & Tier Validation**:
+        *   Call `getUserSubscriptionDataKVAction()` from `actions/stripe/sync-actions.ts` to get the user's current subscription status and `planId` from Redis (the source of truth). Handle potential errors fetching this data.
+        *   Determine the effective `tier` ('starter', 'plus', 'growth') based on the status and `planId`. Use `validateTier` from `lib/rate-limiting/limiter.ts`.
+        *   Check if the user's `tier` allows batch processing (i.e., not 'starter'). Return error `ActionState` if not allowed.
+        *   Get the `batchFileLimit` for the user's `tier` from `lib/config/subscription-plans.ts`.
+        *   Check if `files.length` exceeds `batchFileLimit`. Return error `ActionState` if it does.
+    5.  **Prompt Validation**:
+        *   If `promptStrategy === 'global'`, check if `globalPrompt` is provided and non-empty. Return error `ActionState` if not.
+        *   If `promptStrategy === 'per_document'`, ensure `perDocPrompts` was provided and parsed correctly. (Individual prompt validation happens later during file loop).
+    6.  **Server-Side File Validation**:
+        *   Iterate through the `files` array.
+        *   For each file, validate its MIME type against the allowed list (`application/pdf`, `image/jpeg`, `image/png`).
+        *   Validate its size against `MAX_FILE_SIZE_BYTES`.
+        *   Collect any invalid files and their error reasons.
+        *   If any files are invalid, return a failure `ActionState` listing the invalid files and reasons.
+    7.  **Rate Limiting**: Call `checkRateLimit(userId, tier, 'batch_upload')`. Return error `ActionState` if limit is exceeded.
+    8.  **Preliminary Quota Check**: Call `checkUserQuotaAction(userId, files.length)`. This is a *preliminary* check based on file count, not page count. Return error `ActionState` if this basic check fails (e.g., user has 0 pages left). *Accurate page-based quota checks happen later during background processing.*
+    9.  **Database Transaction (`db.transaction`)**: Wrap the core logic in a transaction for atomicity.
+        *   **Create Batch Record**: `tx.insert(extractionBatchesTable)`:
+            *   `userId`: Authenticated user ID.
+            *   `name`: `batchName` or null.
+            *   `prompt_strategy`: Received `promptStrategy`.
+            *   `extraction_prompt`: `globalPrompt` if strategy is 'global', otherwise `null`.
+            *   `status`: `'pending_upload'`.
+            *   `document_count`: `files.length` (initial count).
+            *   `completed_count`, `failed_count`, `total_pages`: Initialize to 0.
+        *   Retrieve the `newBatchId` from the inserted record.
+        *   **Initialize Loop Variables**: `totalBatchPages = 0`, `successfulUploads = 0`, `failedProcessing = 0`, `documentInsertData = []`.
+        *   **Loop Through Validated Files**: For each `file` in the *validated* file list:
+            *   `try...catch` block for individual file processing resilience.
+            *   **Read Buffer**: Convert `file` to `Buffer`.
+            *   **Generate Storage Path**: Create a unique path: `batches/{userId}/{newBatchId}/{uuidv4()}-{sanitizedFilename}`.
+            *   **Upload to Storage**: Call `uploadToStorage('documents', storagePath, buffer, file.type)` from `lib/supabase/storage-utils.ts`. If upload fails, increment `failedProcessing`, log the error, and `continue` to the next file.
+            *   **Count Pages**: Call `getServerSidePageCount(buffer, file.type)` from `lib/utils/document-utils.ts`. If page counting fails (e.g., corrupted PDF), increment `failedProcessing`, log the error, potentially delete the uploaded file from storage, and `continue`. Add the `pageCount` to `totalBatchPages`.
+            *   **Determine Document Prompt**:
+                *   If `promptStrategy === 'global'`, `docPrompt = null`.
+                *   If `promptStrategy === 'per_document'`, `docPrompt = perDocPromptsMap[file.name] || null`. If `null`, log a warning or potentially mark as failed (`failedProcessing++`, continue).
+                *   If `promptStrategy === 'auto'`, `docPrompt = null`.
+            *   **Prepare Document DB Record**: Create an object for `documentsTable` insertion: `userId`, `batchId: newBatchId`, `originalFilename`, `storagePath`, `mimeType`, `fileSize`, `pageCount`, `extraction_prompt: docPrompt`, `status: 'uploaded'`. Add this object to the `documentInsertData` array.
+            *   Increment `successfulUploads`.
+            *   **Catch Block**: If an error occurs for a file, increment `failedProcessing`, log details.
+        *   **Bulk Insert Documents**: If `successfulUploads > 0`, perform `tx.insert(documentsTable).values(documentInsertData)`.
+        *   **Handle Complete Failure**: If `successfulUploads === 0` and `files.length > 0`, update the batch record status to `'failed'` using `tx`, and `throw new Error("All files failed during upload/processing.")` to rollback and signal failure.
+        *   **Update Batch Record (Success/Partial)**: If at least one file succeeded, update the `extraction_batches` record using `tx`:
+            *   `status`: `'queued'`.
+            *   `document_count`: `successfulUploads`.
+            *   `failed_count`: `failedProcessing`.
+            *   `total_pages`: `totalBatchPages`.
+            *   `updated_at`: `new Date()`.
+        *   Return the `newBatchId`.
+    10. **Post-Transaction**:
+        *   If the transaction succeeded and returned a `batchId`:
+            *   Track analytics event: `trackServerEvent('batch_created', userId, { batchId, fileCount: successfulUploads, totalPages: totalBatchPages, promptStrategy })`.
+            *   Revalidate relevant paths: `/dashboard/batches`, `/dashboard/history`.
+            *   Return success `ActionState` with `{ batchId }`.
+    11. **Outer Error Handling**:
+        *   Wrap the entire action logic in a `try...catch`.
+        *   If the transaction threw the "All files failed" error, return that specific error `ActionState`.
+        *   If the transaction failed for other reasons (DB constraint, etc.) and a `batchId` was created *before* the failure, attempt a best-effort update to set the batch status to `'failed'`.
+        *   Log the error.
+        *   Return a generic failure `ActionState`.
 
-    *   **8.4.1: Create Batch List Action & Page (`/dashboard/batches`)**:
-        *   **Action**: Define `fetchUserBatchesAction` server action. Implement the main batch listing page UI.
-        *   **Files**: `actions/batch/batchActions.ts` (New Action), `app/(dashboard)/dashboard/batches/page.tsx` (New Page), `components/batch/BatchListClient.tsx` (New Client Component).
-        *   **Instructions**:
-            1.  **`fetchUserBatchesAction`**:
-                *   Accept parameters for pagination (`page`, `pageSize`), sorting (`sortBy`, `sortOrder`), and potentially filtering (`statusFilter`, `nameFilter`).
-                *   Authenticate user (`getCurrentUser`).
-                *   Query `extraction_batches` table using Drizzle, applying `WHERE eq(userId, ...)`, filtering, sorting (`orderBy`), and pagination (`limit`, `offset`).
-                *   Include a `count()` query to get the total number of batches matching the filters for pagination controls.
-                *   Return `ActionState<{ batches: SelectExtractionBatch[], totalCount: number }>`. Handle errors gracefully.
-            2.  **`page.tsx` (Server Component)**:
-                *   Fetch initial batch data (e.g., page 1, default sort) using `fetchUserBatchesAction`.
-                *   Pass initial data, total count, and initial query params to `BatchListClient`. Handle initial fetch errors.
-            3.  **`BatchListClient.tsx` (`"use client"`)**:
-                *   Manage state: `batches`, `isLoading`, `error`, `pagination` (`currentPage`, `totalPages`), `sorting`, `filters`.
-                *   Use `useSWR` or a similar hook (with `fetchUserBatchesAction` as the fetcher) for data fetching, enabling automatic revalidation/polling (e.g., `refreshInterval: 5000`) for status updates. Key the SWR hook with filters/sort/page state.
-                *   **UI Implementation**:
-                    *   Use `Card` or a similar container for the main list area.
-                    *   Implement filtering controls (e.g., `DropdownMenu` or `Select` for Status, `Input` with `Search` icon for Name). Use debouncing for the search input.
-                    *   Implement sorting controls (e.g., `DropdownMenu` attached to table headers).
-                    *   Display batches using `DataTable` (from Shadcn examples) or a custom responsive grid/list:
-                        *   **Columns/Fields:** Batch Name (or ID if unnamed), Status (use `Badge` with `getStatusColorClasses` and `getStatusIcon`), **Detailed Progress** (Display `X / Y documents` and a `Progress` bar calculating `(completed_count + failed_count) / document_count * 100`), **Total Pages**, Submitted Date (`formatRelativeTime`), Completed Date (if applicable).
-                        *   **Actions:** Include a "View Details" button/link (`Link href="/dashboard/batches/[batchId]"`) and potentially quick actions like "Delete" (with confirmation dialog) via a `DropdownMenu` (`MoreHorizontal` icon).
-                    *   Implement `Pagination` component based on `totalCount` and `pageSize`.
-                    *   Use `Skeleton` loaders during initial load and refresh.
-                    *   Display clear error messages using `Alert` if fetching fails.
-                    *   Show an informative empty state (e.g., "No batches found matching your criteria" or "Upload your first batch!") with a CTA button linking to `/dashboard/batch-upload`.
-                    *   Use `motion` components for subtle list item animations (e.g., fade-in).
+---
 
-    *   **8.4.2: Create Batch Detail Action & Page (`/dashboard/batches/[batchId]`)**:
-        *   **Action**: Define `fetchBatchDetailsAction` server action. Implement the detail page structure.
-        *   **Files**: `actions/batch/batchActions.ts` (New Action), `app/(dashboard)/dashboard/batches/[batchId]/page.tsx` (New Page).
-        *   **Instructions**:
-            1.  **`fetchBatchDetailsAction`**:
-                *   Accept `batchId` parameter.
-                *   Authenticate user (`getCurrentUser`).
-                *   Query `extraction_batches` table `WHERE eq(id, batchId) AND eq(userId, ...)`. If not found, return error `ActionState`.
-                *   Query associated `documents` table `WHERE eq(batchId, batchId)`, potentially with pagination/sorting options passed in. Select necessary columns: `id`, `originalFilename`, `status`, `pageCount`, `extraction_prompt` (the per-doc one), `updatedAt`.
-                *   Return `ActionState<{ batch: SelectExtractionBatch, documents: SelectDocument[] /* Add pagination info if needed */ }>`.
-            2.  **`page.tsx` (Server Component)**:
-                *   Get `batchId` from `params`.
-                *   Fetch initial batch and document data using `fetchBatchDetailsAction(batchId)`.
-                *   Handle "Not Found" or "Access Denied" errors from the action (e.g., show a 404 page or error message).
-                *   Pass fetched `batch` and initial `documents` data to `BatchDetailClient`.
+**Step 8.3: Implement Background Processing Logic (API Route & Cron)**
 
-    *   **8.4.3: Implement Batch Detail Client Component**:
-        *   **Action**: Build the interactive client component for displaying detailed batch information and associated documents.
-        *   **Files**: `components/batch/BatchDetailClient.tsx` (New Component).
-        *   **Instructions**:
-            1.  `"use client"`. Receive initial `batch` and `documents` props.
-            2.  Use `useSWR` or similar for polling/refreshing batch status and potentially the document list (key SWR with `batchId` and any document filters/sort state).
-            3.  **Batch Summary Display**:
-                *   Use `Card` components to display key batch info: Name, ID, Status (`Badge`), **Prompt Strategy** (display 'Global', 'Per-Document', or 'Auto-Detect').
-                *   If strategy is 'Global', display the `batch.extraction_prompt` (potentially truncated with a "Show More" modal/tooltip).
-                *   Show **Detailed Progress**: Display counts (`Completed: X`, `Failed: Y`, `Pending: Z`) and a prominent `Progress` bar.
-                *   Display Dates: Submitted, Started Processing (if available), Completed At.
-                *   Display **Total Pages**.
-            4.  **Document List Display**:
-                *   Use `DataTable` for the list of documents within the batch.
-                *   **Columns:** Filename (with file type icon), Status (`Badge` with color/icon), **Page Count**, **Effective Prompt** (Display per-doc prompt snippet; use Tooltip/Dialog for full prompt; indicate if 'Global' or 'Auto-resolved' was used), Last Updated (`formatRelativeTime`), Error Message (if status is 'failed', truncated with tooltip/modal).
-                *   **Actions Column:** Include "Review" button (`Link href="/dashboard/review/[documentId]"`) enabled only for `completed` status, potentially "Retry" for `failed` status (Phase 2 enhancement), and "Delete" (with confirmation).
-                *   Implement client-side filtering (by Status) and sorting (by Name, Status, Updated Date) for the document list within the batch detail view.
-            5.  **Interactivity**: Use `motion` for smooth transitions when data updates. Use `Tooltip` extensively for providing more details on hover (e.g., full filenames, full prompts, exact timestamps).
-            6.  Handle loading and error states gracefully within the component.
+*   **Task**: Create a secure API route triggered by a Vercel Cron Job to process documents within queued batches. This route orchestrates the extraction for each document, respecting quotas and prompt strategies.
+*   **Goal**: Reliably process queued batch documents asynchronously, update statuses accurately, handle errors gracefully, and correctly increment user page quotas *only* upon successful extraction.
+*   **Files**:
+    *   `vercel.json` (Add Cron job definition)
+    *   `app/api/batch-processor/route.ts` (New API Route)
+    *   `actions/ai/extraction-actions.ts` (Modify to accept prompt, add `invokedByBatchProcessor` flag)
+    *   `actions/db/user-usage-actions.ts` (Use existing `checkUserQuotaAction`, `incrementPagesProcessedAction`)
+    *   `prompts/classification.ts` (Use `classifyDocument`, `getDefaultPromptForType`)
+    *   `db/db.ts`, schema files.
+*   **Detailed Steps**:
+    1.  **Vercel Cron (`vercel.json`)**: Define a job (e.g., every 5 minutes) targeting `/api/batch-processor`. Include the `CRON_SECRET` in environment variables.
+        ```json
+        {
+          "crons": [
+            {
+              "path": "/api/batch-processor",
+              "schedule": "*/5 * * * *", // Every 5 minutes
+              "headers": { // Optional, but good practice
+                "Authorization": "Bearer ${CRON_SECRET}"
+              }
+            }
+          ]
+        }
+        ```
+    2.  **API Route (`/api/batch-processor/route.ts`)**:
+        *   **Security**: Check `request.headers.get('Authorization')` against `Bearer ${process.env.CRON_SECRET}`. Return 401/403 if invalid.
+        *   **Fetch Queued Batches**: Query `extraction_batches` for records where `status = 'queued'`. Limit the number fetched per run (e.g., 5-10) to avoid timeouts. `ORDER BY created_at ASC` for FIFO processing.
+        *   **Loop Through Batches**: For each fetched `batch`:
+            *   **Atomic Status Update (Locking)**: `UPDATE extraction_batches SET status = 'processing', updated_at = NOW() WHERE id = batch.id AND status = 'queued' RETURNING id`. If `RETURNING` is empty, another processor likely grabbed it; skip this batch.
+            *   **Fetch Documents**: Query `documents` where `batch_id = batch.id` AND `status = 'uploaded'`. Limit the number of documents processed per batch per run (e.g., 20) to manage execution time. Select `id`, `userId`, `pageCount`, `mimeType`, `storagePath`, `extraction_prompt` (the per-doc one).
+            *   **Initialize Counters**: `batchSuccessCount = 0`, `batchFailCount = batch.failed_count` (start with count of files that failed during upload).
+            *   **Loop Through Documents**: For each `doc` in the fetched documents:
+                *   `try...catch` block for individual document processing.
+                *   **Accurate Quota Check**: `quotaResult = await checkUserQuotaAction(doc.userId, doc.pageCount)`.
+                *   **Handle Quota Failure**: If `!quotaResult.isSuccess || !quotaResult.data.hasQuota`:
+                    *   Update `documents` status to `'failed'`, set error message.
+                    *   Update `extraction_jobs` status to `'failed'`, set error message (find job by `document_id`).
+                    *   Increment `batchFailCount`.
+                    *   `continue` to the next document. **Do NOT increment usage.**
+                *   **Update Document Status**: Set `documents.status = 'processing'`.
+                *   **Resolve Prompt (`resolvedPrompt`)**:
+                    *   If `batch.prompt_strategy === 'global'`, `resolvedPrompt = batch.extraction_prompt`.
+                    *   If `batch.prompt_strategy === 'per_document'`, `resolvedPrompt = doc.extraction_prompt`. Handle `null` case (mark as failed or use a default?). Let's mark as failed for now: update status `'failed'`, increment `batchFailCount`, continue.
+                    *   If `batch.prompt_strategy === 'auto'`:
+                        *   If `doc.extraction_prompt` is already set (e.g., from a previous retry), use it.
+                        *   Else: Download blob from `doc.storagePath`. Call `classifyResult = await classifyDocument(...)`. `resolvedPrompt = getDefaultPromptForType(classifyResult.documentType)`. `UPDATE documents SET extraction_prompt = resolvedPrompt WHERE id = doc.id`. Handle classification errors (use default 'other' prompt, log warning).
+                *   **Call AI Extraction**: `aiResult = await extractDocumentDataAction({ documentId: doc.id, extractionPrompt: resolvedPrompt, ... }, true)`. Pass `invokedByBatchProcessor: true`.
+                *   **Handle AI Result**:
+                    *   If `aiResult.isSuccess`: Update `documents` status `'completed'`. Update `extraction_jobs` status `'completed'`. Increment `batchSuccessCount`. **Increment Usage**: `await incrementPagesProcessedAction(doc.userId, doc.pageCount)`.
+                    *   If `!aiResult.isSuccess`: Update `documents` status `'failed'`, set error message. Update `extraction_jobs` status `'failed'`, set error message. Increment `batchFailCount`. **Do NOT increment usage.**
+                *   **Catch Block**: If any error occurs during this document's processing, update doc/job status to `'failed'`, log error, increment `batchFailCount`.
+            *   **Aggregate Batch Status**: After looping through the *current chunk* of documents for the batch:
+                *   Fetch the *latest* counts: `SELECT SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed, SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed FROM documents WHERE batch_id = batch.id`.
+                *   Let `totalProcessed = completed + failed`.
+                *   Determine `finalBatchStatus`:
+                    *   If `totalProcessed === batch.document_count` (all docs attempted):
+                        *   If `failed === 0`, status is `'completed'`.
+                        *   If `completed > 0 && failed > 0`, status is `'partially_completed'`.
+                        *   If `completed === 0 && failed > 0`, status is `'failed'`.
+                    *   Else (more documents left to process in subsequent runs): status remains `'processing'`.
+                *   Update `extraction_batches`: Set `completed_count = completed`, `failed_count = failed`. If `finalBatchStatus` is determined (not 'processing'), set `status = finalBatchStatus` and `completed_at = NOW()`.
+        *   Return `NextResponse.json({ success: true, message: "Batch processing cycle complete." })`. Handle potential errors in the overall route.
+    3.  **Modify `extractDocumentDataAction`**:
+        *   Add `invokedByBatchProcessor: boolean = false` parameter.
+        *   Wrap the `incrementPagesProcessedAction` call: `if (!invokedByBatchProcessor) { await incrementPagesProcessedAction(...) }`.
+        *   Ensure it links the created `extraction_jobs` record to the `batchId` if provided in the input (modify the insert step).
+        *   Respect the `skipClassification` flag passed in the input options.
+
+---
+
+**Step 9.0: Implement Post-Upload UI (Batch List/Detail & Enhanced Review)**
+
+*   **Task**: Create the user interface for monitoring batch progress, viewing results, and reviewing/editing/confirming individual document extractions, incorporating ideas from the provided screenshots.
+*   **Goal**: Provide a clear, interactive, and efficient UI for users to manage their batch uploads and extracted data.
+
+*   **9.1: Batch List Page (`/dashboard/batches`)**
+    *   **File**: `app/(dashboard)/dashboard/batches/page.tsx` (Server Component), `components/batch/BatchListClient.tsx` (Client Component).
+    *   **Objective**: Display a paginated, sortable, and filterable list of the user's batch jobs.
+    *   **Server Component (`page.tsx`)**:
+        *   Fetch initial batch data (page 1, default sort) using a *new* server action: `fetchUserBatchListAction`. This action should fetch `extraction_batches` with pagination/sorting/filtering options, returning `{ batches: SelectExtractionBatch[], totalCount: number }`.
+        *   Pass initial data to `BatchListClient`. Handle fetch errors.
+    *   **Client Component (`BatchListClient.tsx`)**:
+        *   `"use client"`.
+        *   State: `batches`, `isLoading`, `error`, `pagination` (`currentPage`, `totalPages`), `sorting` (`sortBy`, `sortOrder`), `filters` (`statusFilter`, `nameFilter`).
+        *   Data Fetching: Use `useSWR` with `fetchUserBatchListAction` as the fetcher, keyed by state variables (filters, sort, page). Enable polling (`refreshInterval: 5000`).
+        *   **UI (using Shadcn `DataTable` example as a base):**
+            *   **Filtering/Sorting:** Add controls (e.g., `Input` for name search with debouncing, `Select` for status filter, clickable table headers for sorting). Update SWR key/refetch on changes.
+            *   **Table Columns:**
+                *   Batch Name/ID (Link to `/dashboard/batches/[batchId]`).
+                *   Status (`Badge` with color/icon).
+                *   Progress (`Progress` bar: `(completed_count + failed_count) / document_count * 100`, Tooltip showing counts: `Completed: X, Failed: Y, Pending: Z`).
+                *   Documents (`document_count`).
+                *   Total Pages (`total_pages`).
+                *   Submitted (`formatRelativeTime(createdAt)`).
+                *   Completed (`formatRelativeTime(completedAt)` if available).
+                *   Actions (`DropdownMenu`: View Details, Delete Batch - with confirmation).
+            *   **Pagination:** Use Shadcn `Pagination` component, controlled by `currentPage` state and `totalCount`. Trigger refetch on page change.
+            *   **Loading/Error/Empty States:** Implement using `Skeleton` and `Alert`. Provide clear messages and a CTA to upload if no batches exist.
+
+*   **9.2: Batch Detail Page (`/dashboard/batches/[batchId]`)**
+    *   **File**: `app/(dashboard)/dashboard/batches/[batchId]/page.tsx` (Server Component), `components/batch/BatchDetailClient.tsx` (Client Component).
+    *   **Objective**: Display detailed information about a specific batch, including its status, summary, and a list of its associated documents with their individual statuses and actions.
+    *   **Server Component (`page.tsx`)**:
+        *   Get `batchId` from `params`.
+        *   Fetch initial batch and document data using a *new* action: `fetchBatchDetailAction(batchId)`. This action fetches the specific `extraction_batches` record and the *first page* of associated `documents` records (with pagination info).
+        *   Handle "Not Found" / "Access Denied". Pass data to `BatchDetailClient`.
+    *   **Client Component (`BatchDetailClient.tsx`)**:
+        *   `"use client"`. Receive initial `batch` and `documents` props.
+        *   State: `batchDetails`, `documentsList`, `isLoadingBatch`, `isLoadingDocs`, `error`, `docPagination`, `docFilters` (`status`), `docSorting`.
+        *   Data Fetching:
+            *   Use `useSWR` for the `batchDetails` (polling for status updates).
+            *   Use `useSWR` for `documentsList`, keyed by `batchId`, `docPagination`, `docFilters`, `docSorting`. Fetch using a *new* action: `fetchDocumentsForBatchAction(batchId, options)`.
+        *   **UI (incorporating screenshot elements):**
+            *   **Batch Header:** Display batch name/ID, overall status (`Badge`), progress bar/counts, dates, total pages. Add "Edit Extraction" (Phase 2?) and "Delete Batch" buttons. (Screenshot: `Batch TkOLAwspgz` header).
+            *   **Document Filters:** Tabs for "All", "To Review" (Uploaded/Processing?), "Confirmed" (Completed?), "Error" (Failed). Update `docFilters` state and trigger refetch. (Screenshot: Filter tabs).
+            *   **Document Table (`DataTable`):**
+                *   Checkbox column for bulk actions.
+                *   File Name (Link to `/dashboard/review/[documentId]`).
+                *   Status (`Badge` with color/icon).
+                *   Name (Extracted Field - *MVP: Show placeholder or first key field*).
+                *   Line Items (Preview Icon `< >` - *MVP: Show placeholder or count*. Clicking could open a simple modal showing the raw `line_items` JSON/array).
+                *   Options (`DropdownMenu` per row): "Export File", "Redo File", "Delete File". (Screenshot: Options dropdown).
+            *   **Selection Action Bar:** Appears when checkboxes are selected. Buttons: "Redo Files", "Delete Files", "Export As...". (Screenshot: Selection bar).
+            *   **Document Pagination:** Implement if needed based on `fetchDocumentsForBatchAction` results.
+            *   Handle loading/error/empty states for the document list.
+
+*   **9.3: Enhance Review Page (`/dashboard/review/[id]`)**
+    *   **File**: `app/(dashboard)/dashboard/review/[id]/page.tsx` (Client Component - likely needs conversion if it's currently Server).
+    *   **Objective**: Integrate the editing and confirmation workflow shown in the screenshots into the existing review page structure.
+    *   **UI Changes (Right Panel - `DataVisualizer` needs modification or replacement):**
+        *   **Editing:**
+            *   Make fields editable when `editMode` is true (pass `isEditable={editMode}` to `InteractiveDataField`).
+            *   `InteractiveDataField` should render an `Input` when clicked in edit mode.
+            *   Implement "Add Item" / "Remove Item" buttons specifically for array fields (like `line items` in the screenshot). This requires logic within the component rendering the array to manage its state locally before saving.
+        *   **Actions:**
+            *   Replace the existing "Confirm" button with:
+                *   "Save Changes" button: Enabled only when `hasUnsavedChanges && editMode` is true. Calls `handleSaveChanges`.
+                *   "Mark as Confirmed" button: Enabled when `!confirmed && !editMode`. Calls `handleMarkConfirmed`. (Alternatively, combine Save & Confirm).
+                *   "Reset Changes" button: Enabled when `hasUnsavedChanges && editMode`. Triggers `handleReset`.
+            *   Add "Export As..." button: Triggers the `ExportOptionsModal`. (Screenshot: Export button).
+            *   Add "Delete" button (Trash Icon): Triggers delete confirmation. (Screenshot: Trash button).
+        *   **Status Display:** Clearly show the current `File Status` (e.g., "Processed", "Confirmed"). (Screenshot: File Status).
+        *   **Navigation:** Implement Previous/Next document buttons. This requires fetching the list of document IDs *within the same batch* when the page loads and managing the current index.
+    *   **State Management:**
+        *   Add `editMode`, `confirmed`, `originalData`, `hasUnsavedChanges` state variables.
+        *   Modify `fetchDocumentData` to store the initial data in `originalData`.
+        *   Update `hasUnsavedChanges` whenever `extractedData` is modified compared to `originalData`.
+    *   **New Actions:**
+        *   `handleSaveChanges`: Calls `updateExtractedDataAction` with the current `extractedData`. On success, updates `originalData` to match `extractedData`, sets `hasUnsavedChanges` to false, potentially exits edit mode.
+        *   `handleMarkConfirmed`: Calls a *new* action `confirmDocumentStatusAction(documentId)` which updates the `documents.status` to `'confirmed'` (or similar). Updates local `confirmed` state.
+        *   `handleReset`: Resets `extractedData` to `originalData`, sets `editMode` false, `hasUnsavedChanges` false. Show confirmation dialog first.
+
+*   **9.4: Implement Export Functionality**
+    *   **File**: `components/utilities/ExportOptionsModal.tsx` (New Client Component), `actions/batch/batchActions.ts` (New Action: `exportDocumentsAction`).
+    *   **Objective**: Allow users to export data for one or multiple selected documents in various formats, including expanding array fields into multiple rows.
+    *   **Modal Component (`ExportOptionsModal.tsx`)**:
+        *   `"use client"`.
+        *   Props: `isOpen`, `onClose`, `documentIds: string[]`, `availableArrayFields: string[]` (e.g., ['line_items', 'addresses']), `onSubmit: (options) => void`.
+        *   State: `selectedFormat` ('excel', 'csv', 'json'), `exportType` ('normal', 'multiRow'), `selectedArrayField` (string | null).
+        *   UI based on screenshot: File Format buttons, Export Type radio buttons. Conditionally show "Select a field" dropdown (`Select` component) when `exportType === 'multiRow'`, populated with `availableArrayFields`. Cancel/Export File buttons.
+        *   `onSubmit` callback passes the selected options.
+    *   **Server Action (`exportDocumentsAction`)**:
+        *   Inputs: `documentIds: string[]`, `format: 'excel' | 'csv' | 'json'`, `exportType: 'normal' | 'multiRow'`, `arrayFieldToExpand?: string`.
+        *   Auth check.
+        *   Fetch `extracted_data` for all `documentIds` belonging to the user.
+        *   **Formatting Logic:**
+            *   `json`: Simple `JSON.stringify`.
+            *   `normal` (CSV/Excel): Flatten each document's data into a single row. Headers are all unique keys.
+            *   `multiRow` (CSV/Excel): For each document, find the `arrayFieldToExpand`. Create multiple rows, duplicating the non-array fields for each item in the array. Requires careful handling of nested data within the array items. Use a CSV/Excel library (e.g., `papaparse`, `xlsx`) for robust generation.
+        *   Upload generated file to `exports` bucket in Supabase Storage (`exports/{userId}/{exportId}.{format}`).
+        *   Create record in `exports` table (status `processing` initially, update to `completed` or `failed`).
+        *   Generate signed URL for the uploaded export file.
+        *   Return `ActionState<{ downloadUrl: string, exportId: string }>`. (Or trigger download directly if feasible, though returning URL is often better).
+    *   **Integration**: Trigger modal from Batch Detail page (selection bar, options menu) and Review page. Pass selected `documentIds` and detected array fields. Call `exportDocumentsAction` on modal submit. Handle success/error (e.g., show toast, provide download link).
+
+*   **9.5: Implement "Redo" and "Delete" Document Actions**
+    *   **File**: `actions/batch/batchActions.ts` (New Action: `redoDocumentExtractionAction`), `actions/db/documents.ts` (Use existing `deleteDocumentAction`).
+    *   **Objective**: Allow users to re-process failed/completed documents or delete individual documents from a batch.
+    *   **`redoDocumentExtractionAction(documentId: string)`**:
+        *   Auth check.
+        *   Verify document ownership (`SELECT id FROM documents WHERE id = documentId AND user_id = userId`).
+        *   Update `documents` status to `'uploaded'`.
+        *   Update corresponding `extraction_jobs` status to `'queued'`, clear `error_message`.
+        *   Optionally: Delete existing `extracted_data` for this document/job.
+        *   Update parent `extraction_batches` counts (decrement completed/failed, potentially change batch status back to `processing` or `partially_completed`).
+        *   Revalidate paths. Return success/error `ActionState`.
+    *   **`deleteDocumentAction(documentId: string)`**: (Existing action in `actions/db/documents.ts`)
+        *   Ensure this action also updates the parent `extraction_batches` counts (`document_count`, potentially `completed_count`/`failed_count`) after successfully deleting the document and its related job/data (due to cascade). This might require fetching the batch ID *before* deleting the document.
+    *   **Integration**: Add "Redo File" and "Delete File" options to the `DropdownMenu` in the Batch Detail table and potentially on the Review page. Use confirmation dialogs (`AlertDialog`) for delete actions. Disable "Redo" if the document status is already 'processing' or 'queued'. Update UI optimistically or refetch data on success.
 
 ---
 
@@ -388,7 +521,7 @@ This enhanced plan for Step 8.4 aims to deliver a user interface that is not jus
 
 ---
 
-**Step 8.5: Testing (MVP Focus)**
+** Testing (MVP Focus)**
 
 *   **Task**: Validate core functionality, security, and quota mechanisms for the MVP.
 *   **Goal**: Ensure the batch upload MVP is reliable and secure.

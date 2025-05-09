@@ -137,7 +137,7 @@ describe('User Usage Actions', () => {
       expect(result.data?.pagesProcessed).toBe(10); // The implementation returns the original value, not the updated one
 
       // Verify the db calls happened (select/update patterns are indirectly tested)
-      expect(mockExecute).toHaveBeenCalledTimes(4); // With the new implementation, there are more db calls
+      expect(mockExecute).toHaveBeenCalledTimes(5); // Updated from 4 to 5
       expect(mockDb.update).toHaveBeenCalledWith(mockUserUsageTable); // Check update structure
       expect(mockDb.set).toHaveBeenCalledWith(expect.objectContaining({ pagesProcessed: expectedNewPages })); // Check set structure
       // Verify where clause includes the ID for targeted update
@@ -213,7 +213,7 @@ describe('User Usage Actions', () => {
       }
       
       // Verify the db calls happened
-      expect(mockExecute).toHaveBeenCalledTimes(3);
+      expect(mockExecute).toHaveBeenCalledTimes(4);
     });
 
     it('should return hasQuota: false when insufficient quota is available', async () => {
@@ -253,24 +253,32 @@ describe('User Usage Actions', () => {
       expect(result.message).toContain("Development mode: quota check bypassed");
 
       // Verify the db 'get' call happened
-      expect(mockExecute).toHaveBeenCalledTimes(3);
+      expect(mockExecute).toHaveBeenCalledTimes(4);
 
       vi.unstubAllEnvs();
     });
 
-    // This test needs to correctly simulate the failure propagation
     it('should return failure if getCurrentUserUsageAction fails', async () => {
-      // Mock sequence: getCurrentUserUsageAction returns an empty result, but init fails
-      mockExecute.mockResolvedValueOnce([]); // First DB call returns empty
-      mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce({ isSuccess: false, message: 'KV failed during init' });
+      // Resetting mocks specifically for this test to control sequence tightly.
+      mockExecute.mockReset();
+      mockGetUserSubscriptionDataKVAction.mockReset();
 
-      const result = await checkUserQuotaAction(mockUserId);
+      // For getCurrentUserUsageAction's initial select - returns undefined existing usage (empty array)
+      mockExecute.mockResolvedValueOnce([]); 
+      // For getCurrentUserUsageAction's KV check - this one fails
+      mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce({ 
+        isSuccess: false, 
+        message: 'KV failed during getCurrentUserUsageAction'
+      });
+      // Because existingUsage was effectively undefined (from []), and KV failed,
+      // getCurrentUserUsageAction will return { isSuccess: false, message: "Failed to get authoritative..." }
+      // It will NOT proceed to call initializeUserUsageAction in this path.
 
-      expect(result.isSuccess).toBe(false);
-      expect(result.message).toContain('Failed to get authoritative subscription data');
-
-      // Verify the db calls for get and initialize attempt
-      expect(mockExecute).toHaveBeenCalledTimes(1); // Only first call happens since init fails at KV level
+      const resultAfterReset = await checkUserQuotaAction(mockUserId);
+      
+      expect(resultAfterReset.isSuccess).toBe(false); // This remains correct
+      expect(resultAfterReset.message).toContain('Failed to get authoritative subscription data: KV failed during getCurrentUserUsageAction');
+      expect(mockExecute).toHaveBeenCalledTimes(1); // Only the select in getCurrentUserUsageAction
     });
   });
 
@@ -286,7 +294,12 @@ describe('User Usage Actions', () => {
       vi.setSystemTime(nowForInit);
       mockExecute.mockReset();
       mockGetUserSubscriptionDataKVAction.mockReset();
-      // Mock successful KV data for these tests
+
+      // Mock successful profile fetch for initializeUserUsageAction's internal check
+      // This needs to be the FIRST mockExecute for these tests.
+      mockExecute.mockResolvedValueOnce([{ userId: mockUserId }]); 
+
+      // Mock successful KV data for these tests (this was existing)
       mockGetUserSubscriptionDataKVAction.mockResolvedValue({
         isSuccess: true,
         data: {
@@ -318,7 +331,7 @@ describe('User Usage Actions', () => {
         updatedAt: nowForInit,
       };
 
-      mockExecute.mockResolvedValueOnce([existingRecord]); // First select finds this
+      mockExecute.mockResolvedValueOnce([existingRecord]); // First select finds this existing usage record
       mockExecute.mockResolvedValueOnce([updatedRecordReturnedByDb]); // db.update().returning() returns this
 
       const result = await actualInitializeUserUsageAction_for_its_own_tests(mockUserId);
@@ -359,7 +372,7 @@ describe('User Usage Actions', () => {
         createdAt: nowForInit,
         updatedAt: nowForInit,
       };
-      mockExecute.mockResolvedValueOnce([]); // First select finds nothing
+      mockExecute.mockResolvedValueOnce([]); // First select finds nothing for usage
       mockExecute.mockResolvedValueOnce([newRecordInsertedByDb]); // db.insert().returning() returns this
       
       const result = await actualInitializeUserUsageAction_for_its_own_tests(mockUserId);
@@ -412,6 +425,12 @@ describe('getCurrentUserUsageAction', () => {
     mockExecute.mockReset(); // Reset general DB mock
     mockGetUserSubscriptionDataKVAction.mockReset();
     mockInitializeUserUsageAction.mockReset(); // Reset our specific mock for initializeUserUsageAction
+
+    // <<<< NEW >>>>:
+    // Default mock for the profile check that might occur within the *actual* initializeUserUsageAction
+    // if it gets called. We'll make this the first call in most sequences.
+    // It can be overridden per test if a specific test needs to simulate profile not found.
+    mockExecute.mockResolvedValueOnce([{ userId: mockUserId }]);
   });
 
   it('should return existing usage record if it is up-to-date with KV store', async () => {
@@ -425,15 +444,24 @@ describe('getCurrentUserUsageAction', () => {
       createdAt: createDate('2023-11-01T00:00:00Z'),
       updatedAt: createDate('2023-11-02T00:00:00Z'),
     };
-    mockExecute.mockResolvedValueOnce([upToDateUsage]); // Simulate DB returning this record
+    
+    // Override beforeEach mocks for this specific test to ensure sequence
+    mockExecute.mockReset(); 
+    mockGetUserSubscriptionDataKVAction.mockReset();
+    mockInitializeUserUsageAction.mockReset();
+
+    // 1. getCurrentUserUsageAction's initial DB check for existingUsage
+    mockExecute.mockResolvedValueOnce([upToDateUsage]); 
+    // 2. getCurrentUserUsageAction's KV check
     mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce(mockKvDataSuccess);
+    // NO profile check mock here for initializeUserUsageAction because it SHOULD NOT be called.
 
     const result = await getCurrentUserUsageAction(mockUserId);
 
-    expect(result.isSuccess).toBe(true);
+    expect(result.isSuccess).toBe(true); // This should be true if up-to-date
     expect(result.data).toEqual(upToDateUsage);
     expect(mockGetUserSubscriptionDataKVAction).toHaveBeenCalledWith(mockUserId);
-    expect(mockInitializeUserUsageAction).not.toHaveBeenCalled();
+    expect(mockInitializeUserUsageAction).not.toHaveBeenCalled(); // Crucial check
     expect(mockExecute).toHaveBeenCalledTimes(1); // Only the select for existingUsage
   });
 
@@ -523,7 +551,6 @@ describe('getCurrentUserUsageAction', () => {
   });
 
   it('should call initializeUserUsageAction and return its result if no DB record exists', async () => {
-    // Keep original test data
     const newInitializedRecord: SelectUserUsage = {
       id: 'usage-new',
       userId: mockUserId,
@@ -535,22 +562,29 @@ describe('getCurrentUserUsageAction', () => {
       updatedAt: now, // Should be set by initializeUserUsageAction, matching `now` from test setup
     };
 
+    // Override beforeEach mocks for this specific test to ensure sequence
+    mockExecute.mockReset();
+    mockGetUserSubscriptionDataKVAction.mockReset();
+    mockInitializeUserUsageAction.mockReset();
+
     // For getCurrentUserUsageAction's initial DB check - no record found
     mockExecute.mockResolvedValueOnce([]); 
     // For getCurrentUserUsageAction's KV check
     mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce(mockKvDataSuccess);
 
     // ---- For the *actual* initializeUserUsageAction called by getCurrentUserUsageAction ----
-    // 1. Its own KV check
+    // 1. Profile check for initializeUserUsageAction
+    mockExecute.mockResolvedValueOnce([{ userId: mockUserId }]);
+    // 2. Its own KV check
     mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce(mockKvDataSuccess);
-    // 2. Its DB check for existing record for the month - no record found
+    // 3. Its DB check for existing record for the month - no record found
     mockExecute.mockResolvedValueOnce([]); 
-    // 3. Its DB insert operation returning the new record
+    // 4. Its DB insert operation returning the new record
     mockExecute.mockResolvedValueOnce([newInitializedRecord]);
 
     const result = await getCurrentUserUsageAction(mockUserId);
 
-    expect(result.isSuccess).toBe(true);
+    expect(result.isSuccess).toBe(true); // Should now be true
     // For new records, createdAt and updatedAt are set within initializeUserUsageAction.
     // Compare essential fields and date types to avoid exact timestamp mismatches.
     if (result.data) {
@@ -567,7 +601,6 @@ describe('getCurrentUserUsageAction', () => {
   });
 
   it('should correctly pass startDate to initializeUserUsageAction when refreshing', async () => {
-    // This test implies 'needsRefresh' is true. Let's model it as 'no existing record'.
     const refreshedRecord: SelectUserUsage = {
       id: 'refreshed-usage',
       userId: mockUserId,
@@ -579,22 +612,29 @@ describe('getCurrentUserUsageAction', () => {
       updatedAt: now,
     };
 
+    // Override beforeEach mocks for this specific test to ensure sequence
+    mockExecute.mockReset();
+    mockGetUserSubscriptionDataKVAction.mockReset();
+    mockInitializeUserUsageAction.mockReset();
+
     // For getCurrentUserUsageAction's initial DB check - no record found
     mockExecute.mockResolvedValueOnce([]); 
     // For getCurrentUserUsageAction's KV check
     mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce(mockKvDataSuccess);
 
     // ---- For the *actual* initializeUserUsageAction called by getCurrentUserUsageAction ----
-    // 1. Its own KV check
+    // 1. Profile check for initializeUserUsageAction
+    mockExecute.mockResolvedValueOnce([{ userId: mockUserId }]);
+    // 2. Its own KV check
     mockGetUserSubscriptionDataKVAction.mockResolvedValueOnce(mockKvDataSuccess);
-    // 2. Its DB check for existing record for the month - no record found
+    // 3. Its DB check for existing record for the month - no record found
     mockExecute.mockResolvedValueOnce([]); 
-    // 3. Its DB insert operation
+    // 4. Its DB insert operation
     mockExecute.mockResolvedValueOnce([refreshedRecord]);
     
     const result = await getCurrentUserUsageAction(mockUserId);
     
-    expect(result.isSuccess).toBe(true);
+    expect(result.isSuccess).toBe(true); // Should now be true
     // Similar to the 'no DB record exists' test, check key fields and date types
     if (result.data) {
         expect(result.data.id).toEqual(refreshedRecord.id);

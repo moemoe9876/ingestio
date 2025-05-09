@@ -347,12 +347,12 @@ describe("Stripe Webhook Processing", () => {
 
       // Setup getProfileByStripeCustomerIdAction to return a user successfully
       (getProfileByStripeCustomerIdAction as Mock).mockResolvedValueOnce({
-        isSuccess: true,
-        message: "Profile found",
-        data: {
-          userId: mockUserId,
-          stripeCustomerId: mockCustomerId,
-        }
+          isSuccess: true,
+          message: "Profile found",
+          data: {
+            userId: mockUserId,
+            stripeCustomerId: mockCustomerId,
+          }
       });
 
       // Setup updateProfileByStripeCustomerIdAction to throw an error

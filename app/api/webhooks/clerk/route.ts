@@ -1,4 +1,7 @@
+import { db } from '@/db/db';
+import { processedClerkEventsTable } from '@/db/schema';
 import { WebhookEvent } from '@clerk/nextjs/server';
+import { eq } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import { Webhook } from 'svix';
 import { createClerkAdminClient } from './clerk-client';
@@ -36,6 +39,24 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Error verifying webhook' }, { status: 400 });
   }
 
+  // Check for previous processing (Idempotency Key Check)
+  try {
+    const [existingEvent] = await db
+      .select({ eventId: processedClerkEventsTable.eventId })
+      .from(processedClerkEventsTable)
+      .where(eq(processedClerkEventsTable.eventId, svix_id))
+      .limit(1);
+
+    if (existingEvent) {
+      console.log(`[Clerk Webhook] Event ${svix_id} already processed.`);
+      return Response.json({ message: 'Webhook already processed' }, { status: 200 });
+    }
+  } catch (dbError) {
+    console.error(`[Clerk Webhook] Error checking for existing event ${svix_id}:`, dbError);
+    // Proceed with caution, or return an error if this check is critical
+    // For now, we'll log and proceed. If the DB is down, processing might fail later anyway.
+  }
+
   // Get Supabase admin client 
   const supabase = createClerkAdminClient();
   
@@ -48,55 +69,83 @@ export async function POST(req: Request) {
     const primaryEmail = email_addresses?.[0]?.email_address;
     
     if (!primaryEmail) {
+      console.error('[Clerk Webhook] User created event for ID:', id, 'missing primary email.');
       return Response.json({ error: 'No email address found' }, { status: 400 });
     }
     
-    // Combine first and last name if available
     const fullName = [first_name, last_name].filter(Boolean).join(' ') || null;
-    
+    const userCreatedAt = created_at ? new Date(created_at) : new Date(); // Use Clerk's created_at if available
+
     try {
-      // Start a transaction to ensure both tables are updated consistently
-      // Since we're using the Supabase REST API, we'll have to simulate a transaction
-      // with multiple requests and handle errors manually
+      console.log(`[Clerk Webhook] Processing user.created for ID: ${id}, Email: ${primaryEmail}, svix_id: ${svix_id}`);
       
-      // 1. First, insert into the users table (identity information)
-      const { error: userError } = await supabase
+      // 1. Insert into the users table
+      const { error: userInsertError } = await supabase
         .from('users')
         .insert({
           user_id: id,
           email: primaryEmail,
           full_name: fullName,
           avatar_url: image_url || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          created_at: userCreatedAt.toISOString(), // Use consistent ISOString
+          updated_at: new Date().toISOString(),    // Use consistent ISOString
         });
       
-      if (userError) {
-        console.error('Error creating user in users table:', userError);
+      if (userInsertError) {
+        console.error(`[Clerk Webhook] Error inserting into users table for ID: ${id}:`, userInsertError);
         return Response.json({ error: 'Error creating user in users table' }, { status: 500 });
       }
+      console.log(`[Clerk Webhook] Successfully inserted into users table for ID: ${id}`);
+
+      // Verify user creation before proceeding to profile
+      const { data: insertedUser, error: userFetchError } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('user_id', id)
+        .single();
+
+      if (userFetchError || !insertedUser) {
+        console.error(`[Clerk Webhook] Failed to verify user in users table after insert for ID: ${id}:`, userFetchError);
+        // Attempt to clean up if verification fails, though the user might not have been inserted.
+        // This delete operation might fail if the user_id doesn't exist, which is fine.
+        await supabase.from('users').delete().eq('user_id', id); 
+        return Response.json({ error: 'Failed to confirm user creation in users table' }, { status: 500 });
+      }
+      console.log(`[Clerk Webhook] Successfully verified user in users table for ID: ${id}`);
       
-      // 2. Then, insert into the profiles table (subscription/membership info)
-      const { error: profileError } = await supabase
+      // 2. Then, insert into the profiles table
+      const { error: profileInsertError } = await supabase
         .from('profiles')
         .insert({
-          user_id: id,
-          membership: 'starter', // Default to starter tier (was 'free')
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          user_id: id, // This should now reliably exist
+          membership: 'starter',
+          created_at: new Date().toISOString(), // Use consistent ISOString
+          updated_at: new Date().toISOString(),    // Use consistent ISOString
         });
       
-      if (profileError) {
-        // If profile creation fails, attempt to clean up the user record to maintain consistency
+      if (profileInsertError) {
+        console.error(`[Clerk Webhook] Error inserting into profiles table for ID: ${id}:`, profileInsertError);
+        // If profile creation fails, attempt to clean up the user record to maintain consistency.
         await supabase.from('users').delete().eq('user_id', id);
-        console.error('Error creating profile in profiles table:', profileError);
         return Response.json({ error: 'Error creating profile in profiles table' }, { status: 500 });
       }
+      console.log(`[Clerk Webhook] Successfully inserted into profiles table for ID: ${id}`);
       
-      console.log('User and profile created in Supabase:', id);
+      // Mark as processed before returning success
+      try {
+        await db.insert(processedClerkEventsTable).values({ eventId: svix_id });
+        console.log(`[Clerk Webhook] Marked event ${svix_id} (user.created) as processed.`);
+      } catch (logError) {
+        console.error(`[Clerk Webhook] Failed to mark event ${svix_id} as processed:`, logError);
+      }
+      console.log(`[Clerk Webhook] User and profile created successfully in Supabase for ID: ${id}`);
       return Response.json({ message: 'User and profile created in Supabase' }, { status: 200 });
     } catch (error) {
-      console.error('Error syncing user data to Supabase:', error);
+      console.error(`[Clerk Webhook] General error syncing user.created for ID: ${id}, svix_id: ${svix_id}:`, error);
+      // Attempt a general cleanup if an unexpected error occurs.
+      // This might not always succeed or be necessary if earlier specific cleanups ran.
+      await supabase.from('profiles').delete().eq('user_id', id);
+      await supabase.from('users').delete().eq('user_id', id);
       return Response.json({ error: 'Error syncing user data to Supabase' }, { status: 500 });
     }
   }
@@ -208,10 +257,17 @@ export async function POST(req: Request) {
         }
       }
       
+      // Mark as processed before returning success
+      try {
+        await db.insert(processedClerkEventsTable).values({ eventId: svix_id });
+        console.log(`[Clerk Webhook] Marked event ${svix_id} (user.updated) as processed.`);
+      } catch (logError) {
+        console.error(`[Clerk Webhook] Failed to mark event ${svix_id} as processed:`, logError);
+      }
       console.log('User and/or profile updated in Supabase:', id);
       return Response.json({ message: 'User and/or profile updated in Supabase' }, { status: 200 });
     } catch (error) {
-      console.error('Error syncing user update to Supabase:', error);
+      console.error(`[Clerk Webhook] Error syncing user.updated for ID: ${id}, svix_id: ${svix_id}:`, error);
       return Response.json({ error: 'Error syncing user update to Supabase' }, { status: 500 });
     }
   }
@@ -250,14 +306,26 @@ export async function POST(req: Request) {
         return Response.json({ error: 'Error deleting user from Supabase' }, { status: 500 });
       }
       
+      // Mark as processed before returning success
+      if (id) {
+        try {
+          await db.insert(processedClerkEventsTable).values({ eventId: svix_id });
+          console.log(`[Clerk Webhook] Marked event ${svix_id} (user.deleted) as processed.`);
+        } catch (logError) {
+          console.error(`[Clerk Webhook] Failed to mark event ${svix_id} as processed:`, logError);
+        }
+      }
       console.log('User and profile deleted from Supabase:', id);
       return Response.json({ message: 'User and profile deleted from Supabase' }, { status: 200 });
     } catch (error) {
-      console.error('Error deleting user from Supabase:', error);
+      console.error(`[Clerk Webhook] Error deleting user for ID: ${id}, svix_id: ${svix_id}:`, error);
       return Response.json({ error: 'Error deleting user from Supabase' }, { status: 500 });
     }
   }
 
-  return Response.json({ message: 'Webhook received' }, { status: 200 });
+  // Fallback for unhandled event types or if no specific action taken
+  // Do not mark these as processed unless a specific action warrants it.
+  console.log(`[Clerk Webhook] Received event type ${eventType} (svix_id: ${svix_id}), no specific action taken or not explicitly handled for idempotency marking.`);
+  return Response.json({ message: 'Webhook received, no specific action taken' }, { status: 200 });
 } 
 

@@ -6,7 +6,7 @@
 
 import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { db } from "@/db/db";
-import { InsertUserUsage, SelectUserUsage, userUsageTable } from "@/db/schema";
+import { InsertUserUsage, profilesTable, SelectUserUsage, userUsageTable } from "@/db/schema";
 import { RATE_LIMIT_TIERS, SubscriptionTier } from "@/lib/rate-limiting/limiter";
 import { getUTCMonthEnd, getUTCMonthStart } from "@/lib/utils/date-utils";
 import { ActionState } from "@/types";
@@ -50,6 +50,21 @@ export async function initializeUserUsageAction(
   try {
     const now = new Date();
     const referenceDate = options?.startDate || now;
+
+    // Check if the user profile exists
+    const [profile] = await db
+      .select({ userId: profilesTable.userId })
+      .from(profilesTable)
+      .where(eq(profilesTable.userId, userId))
+      .limit(1);
+
+    if (!profile) {
+      console.warn(`[initializeUserUsageAction] No profile found for userId: ${userId}. Cannot initialize usage.`);
+      return {
+        isSuccess: false,
+        message: "User profile not found. Cannot initialize usage record.",
+      };
+    }
 
     const subscriptionResult = await getUserSubscriptionDataKVAction(userId);
     
