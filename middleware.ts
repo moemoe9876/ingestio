@@ -12,6 +12,8 @@ const isPublicRoute = createRouteMatcher([
   "/login(.*)",
   "/signup(.*)",
   "/api/webhooks/clerk",
+  "/api/webhooks/stripe(.*)",
+  "/api/stripe/webhooks(.*)",
   "/pricing",
   "/about",
   "/contact",
@@ -52,7 +54,7 @@ export const config = {
     "/terms",
     "/privacy",
     // Explicitly exclude Clerk webhook routes and static assets
-    "/((?!api/webhooks/clerk|_next|.*\\.(?:jpg|jpeg|gif|png|webp|svg|ico)).*)",
+    "/((?!api/webhooks/clerk|api/webhooks/stripe|api/stripe/webhooks|_next|.*\\.(?:jpg|jpeg|gif|png|webp|svg|ico)).*)",
   ],
 };
 

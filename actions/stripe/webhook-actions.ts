@@ -31,16 +31,17 @@ const ANALYTICS_EVENTS = {
  */
 export async function processStripeWebhookAction(
   rawBody: string,
-  signature: string
+  signature: string,
+  eventId?: string,
+  eventType?: string
 ): Promise<ActionState<{ processed: boolean; eventType?: string }>> {
   try {
-    // TODO: Add event tracking for webhook receipt attempts
-    console.log("[Webhook] Received webhook request.")
+    console.log(`[Webhook Action] Received webhook request. Event ID: ${eventId || 'N/A'}, Type: ${eventType || 'N/A'}`);
 
     const result = await processStripeWebhook(rawBody, signature)
 
     if (!result.success) {
-      console.error(`[Webhook] processStripeWebhook failed: ${result.message}`)
+      console.error(`[Webhook Action] processStripeWebhook failed for Event ID: ${eventId || 'N/A'}. Error: ${result.message}`);
       return {
         isSuccess: false,
         message: result.message || "Failed to process webhook"
@@ -48,8 +49,9 @@ export async function processStripeWebhookAction(
     }
 
     if (result.data?.processed && result.data?.syncedData) {
-      const { eventType, customerId, syncedData } = result.data
-      console.log(`[Webhook] Processing event ${eventType} for customer ${customerId}.`)
+      const currentEventType = eventType || result.data.eventType;
+      const { customerId, syncedData } = result.data
+      console.log(`[Webhook Action] Processing Event ID: ${eventId || 'N/A'}, Type: ${currentEventType} for customer ${customerId}.`);
 
       let userId: string | null = null
 
@@ -75,9 +77,9 @@ export async function processStripeWebhookAction(
         )
 
         if (!updateResult.isSuccess) {
-          console.error(`[Webhook] Failed to denormalize profile update for customer ${customerId}: ${updateResult.message}`);
+          console.error(`[Webhook Action] Failed to denormalize profile update for customer ${customerId}: ${updateResult.message}`);
         } else {
-          console.log(`[Webhook] Successfully denormalized profile for customer ${customerId}`);
+          console.log(`[Webhook Action] Successfully denormalized profile for customer ${customerId}`);
           // Track subscription change event only if update succeeded
           trackServerEvent("subscription_changed", userId, {
             // Pass properties as the third argument
@@ -88,8 +90,8 @@ export async function processStripeWebhookAction(
         }
 
         // Reset usage if applicable
-        if (eventType === "invoice.paid" && isActiveSub && userId) {
-          console.log(`[Webhook] Event is invoice.paid. Initializing/updating usage for user ${userId} based on new invoice period.`);
+        if ((currentEventType === "invoice.paid" || currentEventType === "invoice.payment_succeeded") && isActiveSub && userId) {
+          console.log(`[Webhook Action] Event ID: ${eventId || 'N/A'} is ${currentEventType}. Initializing/updating usage for user ${userId} based on new invoice period.`);
           
           // The refined initializeUserUsageAction will internally fetch the latest subscription data
           // (which should have been updated in KV by syncStripeDataToKV prior to this action running, or as part of it)
@@ -98,33 +100,34 @@ export async function processStripeWebhookAction(
           const initUsageResult = await initializeUserUsageAction(userId);
 
           if (!initUsageResult.isSuccess) {
-            console.error(`[Webhook] Failed to initialize/update usage for user ${userId} after invoice.paid: ${initUsageResult.message}`);
+            console.error(`[Webhook Action] Failed to initialize/update usage for user ${userId} (Event ID: ${eventId || 'N/A'}) after ${currentEventType}: ${initUsageResult.message}`);
           } else {
-            console.log(`[Webhook] Successfully initialized/updated usage for user ${userId} after invoice.paid. Usage data:`, initUsageResult.data);
+            console.log(`[Webhook Action] Successfully initialized/updated usage for user ${userId} (Event ID: ${eventId || 'N/A'}) after ${currentEventType}.`);
           }
         }
       } else {
-        console.log(`[Webhook] No profile found for customerId ${customerId}. Skipping denormalization and usage reset.`);
+        console.log(`[Webhook Action] No profile found for customerId ${customerId}. Skipping denormalization and usage reset.`);
       }
 
       return {
         isSuccess: true,
         message: "Webhook processed successfully",
-        data: { processed: true, eventType: eventType }
+        data: { processed: true, eventType: currentEventType }
       }
     } else if (result.data?.processed === false) {
-      console.log(`[Webhook] Webhook processed but no sync data found or not processed. EventType: ${result.data?.eventType}`);
+      const currentEventType = eventType || result.data?.eventType;
+      console.log(`[Webhook Action] Webhook (Event ID: ${eventId || 'N/A'}, Type: ${currentEventType}) processed but no sync data or not processed.`);
       return {
         isSuccess: true,
         message: "Webhook received but no action taken",
-        data: { processed: false, eventType: result.data?.eventType }
+        data: { processed: false, eventType: currentEventType }
       }
     } else {
-      console.error("[Webhook] Unexpected state: processStripeWebhook succeeded but returned invalid data structure.")
+      console.error(`[Webhook Action] Unexpected state for Event ID: ${eventId || 'N/A'}: processStripeWebhook succeeded but returned invalid data structure.`);
       return { isSuccess: false, message: "Internal error after processing webhook" }
     }
   } catch (error: any) {
-    console.error("[Webhook] Error processing webhook action:", error);
+    console.error(`[Webhook Action] Error processing webhook (Event ID: ${eventId || 'N/A'}):`, error);
     return {
       isSuccess: false,
       message: `Error processing webhook: ${error.message}`
