@@ -80,6 +80,7 @@ export async function initializeUserUsageAction(
     let authoritativeBillingPeriodStart: Date;
     let authoritativeBillingPeriodEnd: Date;
 
+    // Step 1: Check Stripe data first
     if (
       subscriptionResult.data.status === 'active' &&
       subscriptionResult.data.currentPeriodStart &&
@@ -104,12 +105,33 @@ export async function initializeUserUsageAction(
         tier = (subscriptionResult.data.planId as SubscriptionTier) || "starter"; 
       }
     } else {
-      // No active Stripe subscription or missing period data, fall back to calculated UTC month
-      console.log(`[initializeUserUsageAction] No active Stripe subscription or period data for user ${userId}. Using calculated UTC month based on ${referenceDate.toISOString()}.`);
+      // No active Stripe subscription or missing period data from KV store
+      // Step 2: Check user's profile for membership tier as a fallback
+      console.log(`[initializeUserUsageAction] No active Stripe subscription or period data for user ${userId}. Looking up profile membership.`);
       authoritativeBillingPeriodStart = getUTCMonthStart(referenceDate);
       authoritativeBillingPeriodEnd = getUTCMonthEnd(referenceDate);
-      // Tier defaults to starter if no subscription info
-      tier = "starter";
+      
+      try {
+        // Fetch user profile to get current membership tier
+        const [profileData] = await db
+          .select({ membership: profilesTable.membership })
+          .from(profilesTable)
+          .where(eq(profilesTable.userId, userId))
+          .limit(1);
+        
+        if (profileData && profileData.membership) {
+          tier = profileData.membership as SubscriptionTier;
+          console.log(`[initializeUserUsageAction] Found membership tier in profile: ${tier}`);
+        } else {
+          // Tier defaults to starter if profile lookup fails
+          console.log(`[initializeUserUsageAction] No membership tier found in profile. Using default starter tier.`);
+          tier = "starter";
+        }
+      } catch (error) {
+        console.error(`[initializeUserUsageAction] Error looking up profile membership for user ${userId}:`, error);
+        // Default to starter tier if there's an error
+        tier = "starter";
+      }
     }
     
     const pagesLimit = RATE_LIMIT_TIERS[tier]?.pagesPerMonth || RATE_LIMIT_TIERS["starter"].pagesPerMonth;
@@ -292,15 +314,56 @@ export async function getCurrentUserUsageAction(
         console.warn(`[getCurrentUserUsageAction] User ${userId}: Stripe period (${stripeStart.toISOString()} - ${stripeEnd.toISOString()}) does not cover reference date ${referenceDate.toISOString()}. Falling back to UTC month.`);
         authoritativeStart = getUTCMonthStart(referenceDate);
         authoritativeEnd = getUTCMonthEnd(referenceDate);
-        // Tier might still be derivable from subscriptionResult if planId is there
-        authoritativeTier = (subData.planId as SubscriptionTier) || "starter";
+        
+        try {
+          // Fetch user profile to get current membership tier
+          const [profileData] = await db
+            .select({ membership: profilesTable.membership })
+            .from(profilesTable)
+            .where(eq(profilesTable.userId, userId))
+            .limit(1);
+          
+          if (profileData && profileData.membership) {
+            authoritativeTier = profileData.membership as SubscriptionTier;
+            console.log(`[getCurrentUserUsageAction] Found membership tier in profile: ${authoritativeTier}`);
+          } else {
+            // Tier defaults to starter if profile lookup fails
+            console.log(`[getCurrentUserUsageAction] No membership tier found in profile. Using default starter tier.`);
+            authoritativeTier = "starter";
+          }
+        } catch (error) {
+          console.error(`[getCurrentUserUsageAction] Error looking up profile membership for user ${userId}:`, error);
+          // Default to starter tier if there's an error
+          authoritativeTier = "starter";
+        }
       }
     } else {
       // No active Stripe subscription or missing period data, fall back to calculated UTC month
-      console.log(`[getCurrentUserUsageAction] User ${userId}: No active Stripe subscription or period data. Using calculated UTC month based on ${referenceDate.toISOString()}.`);
+      console.log(`[getCurrentUserUsageAction] User ${userId}: No active Stripe subscription or period data. Looking up profile membership.`);
       authoritativeStart = getUTCMonthStart(referenceDate);
       authoritativeEnd = getUTCMonthEnd(referenceDate);
-      authoritativeTier = "starter"; // Default to starter if no subscription info
+      
+      try {
+        // Fetch user profile to get current membership tier
+        const [profileData] = await db
+          .select({ membership: profilesTable.membership })
+          .from(profilesTable)
+          .where(eq(profilesTable.userId, userId))
+          .limit(1);
+        
+        if (profileData && profileData.membership) {
+          authoritativeTier = profileData.membership as SubscriptionTier;
+          console.log(`[getCurrentUserUsageAction] Found membership tier in profile: ${authoritativeTier}`);
+        } else {
+          // Tier defaults to starter if profile lookup fails
+          console.log(`[getCurrentUserUsageAction] No membership tier found in profile. Using default starter tier.`);
+          authoritativeTier = "starter";
+        }
+      } catch (error) {
+        console.error(`[getCurrentUserUsageAction] Error looking up profile membership for user ${userId}:`, error);
+        // Default to starter tier if there's an error
+        authoritativeTier = "starter";
+      }
     }
 
     const authoritativeLimit =

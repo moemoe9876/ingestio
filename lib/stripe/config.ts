@@ -12,14 +12,14 @@ export function getStripeClient(): Stripe {
     throw new Error('STRIPE_SECRET_KEY environment variable is missing');
   }
   
+  // Let the SDK use its default apiVersion for broader compatibility
+  // and to avoid type errors with specific version strings.
   return new Stripe(apiKey, {
-    apiVersion: "2024-06-20", // Always specify the API version explicitly
     appInfo: {
       name: "Ingestio",
       version: "1.0.0", // Track your app version
       url: process.env.NEXT_PUBLIC_APP_URL // Optional: Add your app URL for Stripe dashboard
     },
-    typescript: true,
     maxNetworkRetries: 3, // Add retry capability for better reliability
     timeout: 30000 // 30 seconds timeout
   });

@@ -3,10 +3,17 @@ import dotenv from "dotenv";
 import jwt from 'jsonwebtoken';
 import { afterAll, beforeAll, describe, it } from "vitest";
 
-dotenv.config();
+// Load environment variables from .env.local
+dotenv.config({ path: '.env.local' });
 
 // Skip tests unless explicitly running RLS tests
 export const isRlsTest = process.env.RUN_RLS_TESTS === "true";
+
+// For troubleshooting, log the environment variables (without exposing sensitive values)
+console.log('NEXT_PUBLIC_SUPABASE_URL defined:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
+console.log('NEXT_PUBLIC_SUPABASE_ANON_KEY defined:', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+console.log('SUPABASE_SERVICE_ROLE_KEY defined:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+console.log('SUPABASE_JWT_SECRET defined:', !!process.env.SUPABASE_JWT_SECRET);
 
 export interface TestUser {
   id: string;
