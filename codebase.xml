@@ -1,0 +1,266 @@
+Okay, I've carefully compared your current "Review Document" page with the target design you want to achieve. There are indeed several areas for refinement to match the target aesthetic and user experience, especially regarding layout, spacing, and component styling.
+
+The plan will focus on refactoring your existing components and structure to:
+
+1.  Achieve the precise visual layout and styling of the target design.
+2.  Remove UI elements related to confidence scores.
+3.  Replace `ResizablePanels` with a fixed two-column layout.
+4.  Encapsulate the entire review UI into a reusable component (`ReviewModalContent.tsx`) that can be used both as a full page and within a pop-up dialog.
+5.  Adjust the alignment and padding of controls as you requested.
+
+Here's a detailed plan:
+
+---
+
+## Implementation Plan
+
+### Section 1: Core Reusable Review Component & Layout
+
+*   **[ ] Step 1.1: Create `ReviewModalContent.tsx` Core Component**
+    *   **Task**: Create a new client component `components/review/ReviewModalContent.tsx`. This component will be the main container for the entire two-pane review UI. It will take props like `documentId` (to fetch data internally if used as a page) or `initialDocumentData` and `initialDocumentUrl` (if used in a modal with pre-fetched data). It will manage the state for `extractedData`, `documentUrl`, `fileName`, `fileStatus`, `editMode`, `currentPage`, `totalPages`, `zoomLevel`, `dragMode`, etc.
+        *   The layout will be a fixed two-column flexbox or grid layout (e.g., left pane 50-60%, right pane 40-50% of the available width, or fixed widths if more appropriate for modal consistency). Remove the `ResizablePanels` usage from the current `app/(dashboard)/dashboard/review/[id]/page.tsx`.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx`: (New) Main logic and state management.
+        *   `app/(dashboard)/dashboard/review/[id]/page.tsx`: Will be simplified to mostly render `ReviewModalContent` passing the `documentId`.
+    *   **Step Dependencies**: None.
+    *   **User Instructions**: Initialize with basic state management for data fetching (similar to the current `ReviewPage`). Set up the two-column layout using Tailwind CSS. The overall background of this component should be a light grey/off-white as seen in the target.
+
+*   **[ ] Step 1.2: Style Main Panes and Overall Container**
+    *   **Task**: Apply styling to the left (document preview) and right (editable data) columns within `ReviewModalContent.tsx`. The left pane in the target has a slightly off-white/very light cream background for the document itself. The right pane has a clean white background for the "Edit file result" card. Ensure appropriate padding around and within these panes to match the target.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx`: Update styles for the two main columns.
+        *   `app/globals.css` (or a new `components/review/review.css`): Define any specific background colors or global styles if needed.
+    *   **Step Dependencies**: Step 1.1.
+    *   **User Instructions**: The target image shows the document preview area having a distinct background from the controls above it. The right "Edit file result" section is a distinct card-like element.
+
+### Section 2: Document Preview Panel Refinement (Left Column)
+
+*   **[ ] Step 2.1: Create `DocumentPreviewControls.tsx`**
+    *   **Task**: Create a new client component `components/review/DocumentPreviewControls.tsx`. This will hold the pagination (`< 1 of 1 >`) and zoom controls (`- 150% +`). These controls should be styled as a single unit with a light grey background, rounded corners, and subtle internal dividers, centered horizontally at the top of the document preview pane.
+    *   **Files**:
+        *   `components/review/DocumentPreviewControls.tsx`: (New) UI and logic for pagination/zoom.
+        *   `components/review/ReviewModalContent.tsx`: Integrate `DocumentPreviewControls` into the left pane.
+        *   `components/ui/button.tsx`: Ensure variants for small icon buttons.
+    *   **Step Dependencies**: Step 1.1.
+    *   **User Instructions**: The entire control bar (pagination + zoom) should have consistent padding around it, separating it from the top edge of the left pane and the "Drag Mode" button below it.
+
+*   **[ ] Step 2.2: Reposition and Style "Drag Mode" & "Reset View" Buttons**
+    *   **Task**:
+        *   Move the "Drag Mode" button below the new `DocumentPreviewControls` and align it to the left, with appropriate top margin. Style: dark grey/black background, white text, rounded corners.
+        *   The "Reset View" button is not explicitly in the target image's document preview header. Decide if it's essential. If kept, it should be styled as a secondary button and placed logically, perhaps next to zoom controls or as a separate small button. If removed, ensure its functionality (resetting zoom/pan) is accessible if still needed (e.g., double-click on viewer). For now, let's assume it's removed from the header to match the target.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx` (or a new `DocumentPreviewContainer.tsx` that wraps controls and viewer).
+        *   `components/utilities/DocumentViewer.tsx`: May need to handle reset view internally or via prop.
+    *   **Step Dependencies**: Step 2.1.
+    *   **User Instructions**: Ensure spacing between the top controls, "Drag Mode" button, and the document viewer area matches the target.
+
+*   **[ ] Step 2.3: Adjust `DocumentViewer.tsx` Integration**
+    *   **Task**: Ensure `DocumentViewer.tsx` (and `PdfViewerUrl.tsx`) integrates cleanly within the new left pane structure. It should fill the remaining vertical space. Remove any direct zoom/pagination controls from `DocumentViewer` itself if they were previously there, as these are now in `DocumentPreviewControls.tsx`.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx` (or `DocumentPreviewContainer.tsx`).
+        *   `components/utilities/DocumentViewer.tsx`.
+        *   `components/utilities/PdfViewerUrl.tsx`.
+    *   **Step Dependencies**: Step 2.2.
+    *   **User Instructions**: The document display area should have a clear, slightly off-white or very light cream background for the document pages themselves, distinct from the control bar.
+
+### Section 3: Editable Data Panel Refinement (Right Column)
+
+*   **[ ] Step 3.1: Refactor Right Pane Header & File Info**
+    *   **Task**: Modify the right pane's structure.
+        *   The main title should be "Edit file result".
+        *   Remove the "Review and confirm extracted information" subtitle.
+        *   The "File Name:" and "File Status:" should be displayed below the title, styled as label-value pairs.
+        *   The "Processed by: gemini-2.0-flash-001" line should be removed.
+        *   The success toast ("File status updated successfully!") should be a separate, conditionally rendered element at the top-right of this pane, styled with a green checkmark and light green background.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx` (for managing right pane content).
+        *   Potentially a new `EditableDataHeader.tsx` component.
+        *   `components/ui/alert.tsx` or custom styling for the toast.
+    *   **Step Dependencies**: Step 1.2.
+    *   **User Instructions**: Match font sizes, colors, and spacing for the header and file info section from the target image.
+
+*   **[ ] Step 3.2: Remove Confidence UI Elements**
+    *   **Task**:
+        *   Remove the "Confidence Threshold: 0%" slider and its label from the UI.
+        *   Remove the top-level "Confidence: 0.95" display.
+        *   Remove all individual confidence score badges (e.g., "95%") next to line item values or other fields.
+        *   The `DataVisualizer` and `InteractiveDataField` should no longer display confidence.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/review/[id]/page.tsx` (remove state and props related to confidence threshold).
+        *   `components/review/ReviewModalContent.tsx` (if confidence state was moved here).
+        *   `components/utilities/DataVisualizer.tsx`: Remove rendering of confidence slider and logic related to `minConfidence` for filtering if it's only for display. If confidence is still used for backend/internal logic, keep the prop but don't display it.
+        *   `components/utilities/InteractiveDataField.tsx`: Remove display of confidence badge.
+        *   `components/ui/badge.tsx`: No changes needed here, just stop using it for confidence.
+    *   **Step Dependencies**: None.
+    *   **User Instructions**: The UI should be clean of any confidence-related numbers or visual indicators.
+
+*   **[ ] Step 3.3: Refactor `DataVisualizer.tsx` for Target Layout**
+    *   **Task**: Modify `DataVisualizer.tsx` (or create a new `EditableDataForm.tsx` if `DataVisualizer` is too complex to refactor cleanly for this specific view).
+        *   Remove the "Filter", "CSV", "JSON" buttons, and the "Tree/JSON" toggle from its immediate header. These will be part of the main action toolbar at the bottom of the right pane.
+        *   The search input ("Search fields...") should remain.
+        *   Remove "Expand All" / "Collapse All" buttons. The target UI for line items is always expanded in a table-like format.
+        *   The primary display area should now render simple fields and line items as per the target.
+    *   **Files**:
+        *   `components/utilities/DataVisualizer.tsx` (or new `components/review/EditableDataForm.tsx`).
+        *   `components/ui/input.tsx` (for search).
+    *   **Step Dependencies**: Step 3.2.
+    *   **User Instructions**: The focus is on a simpler, more direct editable form rather than a complex data visualization tool for this specific UI.
+
+*   **[ ] Step 3.4: Implement Simple Editable Field Display**
+    *   **Task**: Create/Refine `components/review/EditableFieldItem.tsx`. This component will display a label (e.g., "name") and an input-like container for its value (e.g., "DERRICK CRUZ").
+        *   The container should be white with a light grey border and rounded corners.
+        *   It should support an `isEditing` prop to switch between displaying text and an actual `<input>`.
+    *   **Files**:
+        *   `components/review/EditableFieldItem.tsx`: (New or heavily refactor `InteractiveDataField.tsx`).
+        *   `components/ui/input.tsx`.
+        *   `components/ui/label.tsx`.
+    *   **Step Dependencies**: Step 3.3.
+    *   **User Instructions**: This will be used for fields like "name" in the target.
+
+*   **[ ] Step 3.5: Implement Line Items Display**
+    *   **Task**: Create `components/review/EditableLineItems.tsx`.
+        *   It will have a header: "line items" label and a badge showing the count (e.g., "6 items"). The badge is pill-shaped, light grey background, dark grey text.
+        *   It will render a list of line items. Each item will have:
+            *   A number (e.g., "1.").
+            *   An input-like container for the item's description/text (editable).
+            *   A red circular button with a white minus icon to its right.
+    *   **Files**:
+        *   `components/review/EditableLineItems.tsx`: (New).
+        *   `components/review/EditableFieldItem.tsx`: Can be adapted for the line item text input.
+        *   `components/ui/badge.tsx`.
+        *   `components/ui/button.tsx`.
+        *   `lucide-react` (for minus icon).
+    *   **Step Dependencies**: Step 3.3, 3.4.
+    *   **User Instructions**: The line items are not in a table with headers in the target, but rather a list of editable text fields.
+
+*   **[ ] Step 3.6: Integrate Field Rendering in `EditableDataForm.tsx` (or refactored `DataVisualizer`)**
+    *   **Task**: The main data display component should iterate through the `extractedData`.
+        *   For simple key-value pairs (like "name"), render `EditableFieldItem.tsx`.
+        *   For arrays identified as line items, render `EditableLineItems.tsx`.
+        *   Ensure proper spacing and layout between these sections.
+    *   **Files**:
+        *   `components/utilities/DataVisualizer.tsx` (or `components/review/EditableDataForm.tsx`).
+    *   **Step Dependencies**: Step 3.4, 3.5.
+    *   **User Instructions**: This step connects the individual field components into the main data area.
+
+### Section 4: Action Toolbar (Bottom of Right Column)
+
+*   **[ ] Step 4.1: Create `ReviewActionToolbar.tsx`**
+    *   **Task**: Create a new client component `components/review/ReviewActionToolbar.tsx`. This will house all the buttons at the bottom of the right pane.
+    *   **Files**:
+        *   `components/review/ReviewActionToolbar.tsx`: (New).
+        *   `components/review/ReviewModalContent.tsx`: Integrate this toolbar at the bottom of the right pane.
+    *   **Step Dependencies**: Step 1.1.
+    *   **User Instructions**: Use a flexbox to arrange items: left-aligned group, center-aligned "Export As", right-aligned "Confirm" and pagination.
+
+*   **[ ] Step 4.2: Implement Left-Aligned Action Buttons**
+    *   **Task**: Add the "Reset" button (trash icon, no text in target, but your current has "Reset"), Download button (download icon), and a third icon button (folder/save icon in target). Style them as icon-only buttons with a light grey background or border, matching the target.
+    *   **Files**:
+        *   `components/review/ReviewActionToolbar.tsx`.
+        *   `lucide-react` (Trash2, Download, FolderKanban or Save).
+        *   `components/ui/button.tsx`.
+    *   **Step Dependencies**: Step 4.1.
+    *   **User Instructions**: The "Reset" button in the target is just a trash icon. Clarify if "Reset" text is needed or if it's a "Delete" action. The third icon's purpose needs clarification (Save Draft? Save as Template?).
+
+*   **[ ] Step 4.3: Implement "Export As" Button**
+    *   **Task**: Add the "Export As >" button. Style: pill-shaped, light grey background, dark grey text, right chevron icon. This should trigger the existing `ExportModal` or a refactored version.
+    *   **Files**:
+        *   `components/review/ReviewActionToolbar.tsx`.
+        *   `components/utilities/export-modal.tsx`: May need styling adjustments for the trigger.
+        *   `lucide-react` (ChevronRight).
+    *   **Step Dependencies**: Step 4.1.
+    *   **User Instructions**: Ensure the modal is triggered correctly.
+
+*   **[ ] Step 4.4: Implement "Confirm" Button**
+    *   **Task**: Add the "Confirm" button. Style: primary action color (blue/purple gradient or solid), white text, checkmark icon, rounded corners.
+    *   **Files**:
+        *   `components/review/ReviewActionToolbar.tsx`.
+        *   `lucide-react` (Check).
+    *   **Step Dependencies**: Step 4.1.
+    *   **User Instructions**: This is the main call-to-action button in this pane.
+
+*   **[ ] Step 4.5: Implement Line Item Footer Pagination**
+    *   **Task**: Add the pagination for line items (e.g., `< 7 of 23 >`) to the right of the "Confirm" button.
+    *   **Files**:
+        *   `components/review/ReviewActionToolbar.tsx`.
+        *   `lucide-react` (ChevronLeft, ChevronRight).
+    *   **Step Dependencies**: Step 4.1.
+    *   **User Instructions**: This implies that if there are many line items, they might be paginated within the right pane.
+
+### Section 5: Backend Connectivity & Functionality
+
+*   **[ ] Step 5.1: Connect Data Fetching to `ReviewModalContent.tsx`**
+    *   **Task**: Ensure `ReviewModalContent.tsx` correctly calls `fetchDocumentForReviewAction` (if it's managing its own data via `documentId`) or accepts `initialDocumentData` and `initialDocumentUrl` as props. Update its internal state with the fetched/passed data.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx`.
+        *   `actions/db/documents.ts` (verify `fetchDocumentForReviewAction` provides all necessary fields like `fileStatus`).
+    *   **Step Dependencies**: Step 1.1.
+    *   **User Instructions**: Handle loading states and error display within `ReviewModalContent`.
+
+*   **[ ] Step 5.2: Connect Editing and Confirmation Logic**
+    *   **Task**:
+        *   Ensure that changes made in `EditableFieldItem` and `EditableLineItems` update the main `extractedData` state in `ReviewModalContent.tsx`.
+        *   The "Confirm" button in `ReviewActionToolbar.tsx` should trigger the `handleConfirm` function in `ReviewModalContent.tsx`, which in turn calls `updateExtractedDataAction` with the current `extractedData`.
+        *   The success/error notification should be displayed based on the action's result.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx`.
+        *   `components/review/EditableFieldItem.tsx`.
+        *   `components/review/EditableLineItems.tsx`.
+        *   `components/review/ReviewActionToolbar.tsx`.
+        *   `actions/db/documents.ts` (ensure `updateExtractedDataAction` can handle the data structure and also updates the document's main status, e.g., to "processed" or "confirmed").
+    *   **Step Dependencies**: Section 3, Section 4, Step 5.1.
+    *   **User Instructions**: Implement loading state for the "Confirm" button.
+
+*   **[ ] Step 5.3: Connect Document Preview Controls**
+    *   **Task**: Wire up the pagination and zoom controls in `DocumentPreviewControls.tsx` to update the state in `ReviewModalContent.tsx`, which then passes these down to `DocumentViewer.tsx`. The "Drag Mode" button should also toggle a state in `ReviewModalContent.tsx` passed to `DocumentViewer.tsx`.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx`.
+        *   `components/review/DocumentPreviewControls.tsx`.
+    *   **Step Dependencies**: Step 2.1, Step 2.2, Step 2.3.
+    *   **User Instructions**: Ensure smooth interaction between controls and the viewer.
+
+### Section 6: Modal Integration for Batch Upload & History
+
+*   **[ ] Step 6.1: Prepare `ReviewModalContent.tsx` for Modal Usage**
+    *   **Task**: Ensure `ReviewModalContent.tsx` can function correctly when rendered inside a modal (e.g., `components/ui/dialog.tsx`). This means it should gracefully handle potentially smaller available space and rely on props for initial data rather than fetching via `documentId` if `initialDocumentData` is provided.
+    *   **Files**:
+        *   `components/review/ReviewModalContent.tsx`.
+    *   **Step Dependencies**: All UI and data integration steps for `ReviewModalContent`.
+    *   **User Instructions**: Test rendering `ReviewModalContent` within a `Dialog` with mock data.
+
+*   **[ ] Step 6.2: Integrate `ReviewModalContent` into Batch Upload Workflow**
+    *   **Task**: On the (to-be-created) batch upload results page, when a user clicks an icon next to a processed file, open a `Dialog` containing `ReviewModalContent`. Fetch the specific document's data and URL and pass them as `initialDocumentData` and `initialDocumentUrl` to `ReviewModalContent`.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/batch-upload/[batchId]/page.tsx` (or similar for batch results).
+        *   `components/review/ReviewModalContent.tsx`.
+        *   `components/ui/dialog.tsx`.
+    *   **Step Dependencies**: Step 6.1.
+    *   **User Instructions**: The dialog should be large enough to comfortably display the two-pane review UI.
+
+*   **[ ] Step 6.3: Integrate `ReviewModalContent` into History Page (`Sheet` to `Dialog`)**
+    *   **Task**: Modify `app/(dashboard)/dashboard/history/page.tsx`. Instead of using a `Sheet` for "View Details", use a `Dialog` that renders `ReviewModalContent`.
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/history/page.tsx`: Replace `Sheet` with `Dialog` and pass appropriate data to `ReviewModalContent`.
+        *   `components/review/ReviewModalContent.tsx`.
+        *   `components/ui/dialog.tsx`.
+    *   **Step Dependencies**: Step 6.1.
+    *   **User Instructions**: This will provide a consistent review experience across the application.
+
+### Section 7: Final Polish & Testing
+
+*   **[ ] Step 7.1: Remove Redundant Components/Code**
+    *   **Task**: After refactoring, identify and remove any old components or code sections in `app/(dashboard)/dashboard/review/[id]/page.tsx` or `components/utilities/DataVisualizer.tsx` that are no longer needed due to the new structure (e.g., old layout code, old field rendering logic if fully replaced).
+    *   **Files**:
+        *   `app/(dashboard)/dashboard/review/[id]/page.tsx`.
+        *   `components/utilities/DataVisualizer.tsx` (if heavily refactored or replaced).
+        *   Any other components that become obsolete.
+    *   **Step Dependencies**: All previous refactoring steps.
+    *   **User Instructions**: Clean up the codebase to reflect the new design.
+
+*   **[ ] Step 7.2: Comprehensive UI/UX Testing**
+    *   **Task**: Test the new review UI thoroughly on different screen sizes (where applicable, though the target is desktop-centric), with different documents, and test all interactions (editing, confirming, exporting, drag mode, zoom, pagination).
+    *   **Files**: All `components/review/*` and the main review page/modal integration points.
+    *   **Step Dependencies**: All previous steps.
+    *   **User Instructions**: Ensure the user flow is intuitive and all visual elements match the target design. Check for any layout breaks or styling inconsistencies.
+
+This plan aims for a significant UI overhaul while reusing backend logic and leveraging your existing component library. Remember to break these steps down further as you implement and test incrementally. Good luck!

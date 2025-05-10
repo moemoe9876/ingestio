@@ -29,10 +29,10 @@ interface PromptInputProps {
 export function PromptInput({ onSubmit, file }: PromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState<ExtractionOptions>({
-    includeConfidence: true,
+    includeConfidence: false,
     includePositions: false,
     detectDocumentType: true,
-    temperature: 0.0
+    temperature: 0.1
   });
 
   useEffect(() => {

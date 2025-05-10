@@ -7,7 +7,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { DataVisualizer } from "@/components/utilities/DataVisualizer";
 import DocumentViewer from "@/components/utilities/DocumentViewer";
-import { ResizablePanels } from "@/components/utilities/ResizablePanels";
 import { AlertCircle, Edit, FileText, Loader2, MessageSquare, RotateCcw, Save } from "lucide-react";
 import * as React from "react";
 import { useEffect, useState } from "react";
@@ -20,18 +19,6 @@ interface PageProps {
 
 interface FieldData {
   value: string | number;
-  confidence: number;
-  position?: {
-    page_number: number;
-    bounding_box: [number, number, number, number]; // [x1, y1, x2, y2] as percentages
-  };
-}
-
-interface HighlightRect {
-  pageNumber: number;
-  boundingBox: [number, number, number, number];
-  color?: string;
-  id: string;
 }
 
 type ExtractedData = {
@@ -44,10 +31,6 @@ interface ExtractionMetadata {
   prompt: string;
   processingTimeMs: number;
   jobId?: string;
-  options?: {
-    includePositions?: boolean;
-    includeConfidence?: boolean;
-  };
 }
 
 // Helper function for updating nested data safely
@@ -73,12 +56,12 @@ const updateNestedExtractedData = (
       } else if (typeof currentLevel === 'object' && currentLevel !== null && currentLevel.hasOwnProperty(part)) {
         currentLevel = currentLevel[part];
       } else {
-        console.error(`Invalid path segment ${part} during update traversal`);
+        // console.error(`Invalid path segment ${part} during update traversal`);
         return data; // Return original data if path is invalid
       }
 
       if (currentLevel === null || typeof currentLevel === 'undefined') {
-         console.error(`Path segment ${part} leads to null/undefined`);
+        //  console.error(`Path segment ${part} leads to null/undefined`);
          return data;
       }
     }
@@ -93,7 +76,7 @@ const updateNestedExtractedData = (
     } else if (typeof currentLevel === 'object' && currentLevel !== null && currentLevel.hasOwnProperty(finalPart)) {
         targetToUpdate = currentLevel[finalPart];
     } else {
-        console.error(`Cannot find final path segment ${finalPart}`);
+        // console.error(`Cannot find final path segment ${finalPart}`);
         return data;
     }
 
@@ -103,20 +86,20 @@ const updateNestedExtractedData = (
     } else {
          // If it's not a FieldData structure, maybe update directly? Or log error?
          // Let's assume direct update for now if not FieldData, but log a warning.
-         console.warn(`Updating path "${path}" which doesn't seem to be a FieldData object. Setting value directly.`);
+        //  console.warn(`Updating path "${path}" which doesn't seem to be a FieldData object. Setting value directly.`);
           if (finalArrayIndex !== -1 && Array.isArray(currentLevel)) {
              currentLevel[finalArrayIndex] = newValue;
          } else if (typeof currentLevel === 'object' && currentLevel !== null) {
              currentLevel[finalPart] = newValue;
          } else {
-             console.error("Cannot update non-object/array parent.");
+            //  console.error("Cannot update non-object/array parent.");
              return data;
          }
     }
 
     return newData as ExtractedData; // Assert type on return
   } catch (error) {
-    console.error("Error during deep copy or update:", error);
+    // console.error("Error during deep copy or update:", error);
     return data; // Return original data on error
   }
 };
@@ -133,7 +116,6 @@ export default function ReviewPage({ params }: PageProps) {
   const [extractionMetadata, setExtractionMetadata] = useState<ExtractionMetadata | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [currentHighlight, setCurrentHighlight] = useState<HighlightRect | null>(null);
   const [selectedFieldPath, setSelectedFieldPath] = useState<string | null>(null);
 
   const toggleEditMode = () => {
@@ -145,13 +127,13 @@ export default function ReviewPage({ params }: PageProps) {
   };
 
   const saveChanges = () => {
-    console.log("Save changes clicked. Data to save:", extractedData);
+    // console.log("Save changes clicked. Data to save:", extractedData);
     setIsEditing(false);
     toast({ title: "Placeholder Save", description: "Changes would be saved here." });
   };
 
   const handlePdfPositionClick = (pageNumber: number, position: [number, number]) => {
-    console.log(`PDF Clicked at page ${pageNumber}, position: [${position[0]}, ${position[1]}]`);
+    // console.log(`PDF Clicked at page ${pageNumber}, position: [${position[0]}, ${position[1]}]`);
     // Placeholder: Add logic later if needed (e.g., findFieldByPosition and select)
   };
 
@@ -159,12 +141,8 @@ export default function ReviewPage({ params }: PageProps) {
     setExtractedData(prevData => updateNestedExtractedData(prevData, path, newValue));
   };
 
-  const handleHighlightUpdate = (highlight: HighlightRect | null) => {
-    setCurrentHighlight(highlight);
-  };
-
   const handleFieldSelect = (path: string, value: any) => {
-    console.log("[UI DEBUG] Field Selected:", path, value);
+    // console.log("[UI DEBUG] Field Selected:", path, value);
     setSelectedFieldPath(path);
   };
 
@@ -179,7 +157,7 @@ export default function ReviewPage({ params }: PageProps) {
           throw new Error("Invalid document ID");
         }
         
-        console.log("[UI DEBUG] Fetching document data for ID:", documentId);
+        // console.log("[UI DEBUG] Fetching document data for ID:", documentId);
         
         const result = await fetchDocumentForReviewAction(documentId);
         
@@ -196,13 +174,13 @@ export default function ReviewPage({ params }: PageProps) {
              // Add other default fields from ExtractionMetadata if necessary
            };
 
-          console.log("[UI DEBUG] Fetched document:", document.originalFilename);
-          console.log("[UI DEBUG] Fetched signed URL:", signedUrl ? 'Yes' : 'No');
-          console.log("[UI DEBUG] Extracted data keys:", actualExtractedData ? Object.keys(actualExtractedData) : 'None');
-          console.log("[UI DEBUG] Extraction metadata:", actualMetadata);
+          // console.log("[UI DEBUG] Fetched document:", document.originalFilename);
+          // console.log("[UI DEBUG] Fetched signed URL:", signedUrl ? 'Yes' : 'No');
+          // console.log("[UI DEBUG] Extracted data keys:", actualExtractedData ? Object.keys(actualExtractedData) : 'None');
+          // console.log("[UI DEBUG] Extraction metadata:", actualMetadata);
 
           if (!actualExtractedData) {
-            console.warn("[UI DEBUG] No actual extracted data found in the response.");
+            // console.warn("[UI DEBUG] No actual extracted data found in the response.");
             // Decide how to handle - show message? Set empty state?
             // For now, setting to null which will show "No extracted data available."
             setExtractedData(null);
@@ -220,7 +198,7 @@ export default function ReviewPage({ params }: PageProps) {
         }
 
       } catch (error) {
-        console.error("Error fetching document data:", error);
+        // console.error("Error fetching document data:", error);
         setHasError(true);
         setErrorMessage(error instanceof Error ? error.message : "Failed to fetch document data");
         setExtractedData(null); // Clear data on error
@@ -271,14 +249,9 @@ export default function ReviewPage({ params }: PageProps) {
         </p>
       </div>
 
-      <ResizablePanels 
-        defaultLeftWidth={40}
-        minLeftWidth={25}
-        maxLeftWidth={60}
-        storageKey="reviewPagePanels"
-        className="flex-1 h-[calc(100%-4rem)] rounded-lg box-border"
-        leftPanel={
-          <div className="h-full flex flex-col p-2 box-border">
+      <div className="flex flex-1 h-[calc(100%-7rem)] rounded-lg box-border gap-4">
+        <div className="w-2/5 h-full flex flex-col p-2 box-border">
+          <div className="h-full flex flex-col">
             <Card className="flex-1 border-border rounded-lg overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Document</CardTitle>
@@ -286,9 +259,8 @@ export default function ReviewPage({ params }: PageProps) {
               </CardHeader>
               <CardContent className="h-[calc(100%-60px)] p-2">
                 {pdfUrl ? (
-                  <DocumentViewer 
-                    url={pdfUrl} 
-                    highlights={currentHighlight ? [currentHighlight] : []}
+                  <DocumentViewer
+                    url={pdfUrl}
                     onPositionClick={handlePdfPositionClick}
                   />
                 ) : isLoading ? (
@@ -305,9 +277,9 @@ export default function ReviewPage({ params }: PageProps) {
               </CardContent>
             </Card>
           </div>
-        }
-        rightPanel={
-          <div className="h-full flex flex-col p-2 box-border">
+        </div>
+        <div className="w-3/5 h-full flex flex-col p-2 box-border">
+          <div className="h-full flex flex-col">
             <Tabs defaultValue="data" className="flex-1 flex flex-col h-full">
               <TabsList className="mb-4">
                 <TabsTrigger value="data">Extracted Data</TabsTrigger>
@@ -338,7 +310,6 @@ export default function ReviewPage({ params }: PageProps) {
                       <DataVisualizer
                         data={extractedData}
                         onEdit={handleFieldEdit}
-                        onHighlight={handleHighlightUpdate}
                         onSelect={handleFieldSelect}
                         selectedFieldPath={selectedFieldPath}
                       />
@@ -399,8 +370,8 @@ export default function ReviewPage({ params }: PageProps) {
               </TabsContent>
             </Tabs>
           </div>
-        }
-      />
+        </div>
+      </div>
     </div>
   );
 } 

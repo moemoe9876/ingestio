@@ -1,34 +1,22 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Braces, Copy, RotateCcw, ChevronDown, ChevronRight, Search, X } from "lucide-react";
-import { useState, useMemo } from "react";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Braces, ChevronDown, ChevronRight, Copy, RotateCcw, Search, X } from "lucide-react";
+import { useMemo, useState } from "react";
 
 interface FieldData {
   value: string | number;
-  confidence: number;
-  location?: {
-    page: number;
-    coordinates?: {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
-  };
 }
 
 type ExtractedData = {
@@ -39,15 +27,7 @@ interface ResultDisplayProps {
   result: ExtractedData;
   schema: string;
   onReset: () => void;
-  onFieldHover?: (field: string, data: any) => void;
 }
-
-// Helper function to get confidence color based on score
-const getConfidenceColor = (confidence: number) => {
-  if (confidence >= 0.9) return "bg-green-100 text-green-800 hover:bg-green-200";
-  if (confidence >= 0.7) return "bg-yellow-100 text-yellow-800 hover:bg-yellow-200";
-  return "bg-red-100 text-red-800 hover:bg-red-200";
-};
 
 // Helper function to format field names for display
 const formatFieldName = (name: string) => {
@@ -62,7 +42,6 @@ export function ResultDisplay({
   result, 
   schema, 
   onReset,
-  onFieldHover 
 }: ResultDisplayProps) {
   const [copied, setCopied] = useState(false);
   const [schemaCopied, setSchemaCopied] = useState(false);
@@ -189,26 +168,12 @@ export function ResultDisplay({
     
     // Handle objects
     if (typeof data === "object") {
-      // Check if this is a field data object (with value and confidence)
-      if ("value" in data && "confidence" in data) {
+      // Check if this is a field data object (with value)
+      if ("value" in data && Object.keys(data).length === 1) { // Check if it *only* has value
         const fieldData = data as FieldData;
         return (
-          <div 
-            className="flex items-center gap-2"
-            onMouseEnter={() => onFieldHover && path && onFieldHover(path, fieldData)}
-          >
+          <div className="flex items-center gap-2">
             <span className="font-medium">{String(fieldData.value)}</span>
-            <Badge 
-              variant="outline" 
-              className={cn("text-xs", getConfidenceColor(fieldData.confidence))}
-            >
-              {Math.round(fieldData.confidence * 100)}%
-            </Badge>
-            {fieldData.location && (
-              <span className="text-xs text-muted-foreground">
-                Page {fieldData.location.page}
-              </span>
-            )}
           </div>
         );
       }
@@ -339,12 +304,6 @@ export function ResultDisplay({
         )}
       </div>
       
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span>Confidence indicators:</span>
-        <Badge variant="outline" className={getConfidenceColor(0.95)}>High (90-100%)</Badge>
-        <Badge variant="outline" className={getConfidenceColor(0.8)}>Medium (70-89%)</Badge>
-        <Badge variant="outline" className={getConfidenceColor(0.5)}>Low (0-69%)</Badge>
-      </div>
     </div>
   );
 }

@@ -129,8 +129,12 @@ export default function UploadPage() {
             const extractionResult = await extractDocumentDataAction({
               documentId: uploadResult.data.id,
               extractionPrompt: extractionPrompt,
-              includeConfidence: true,
-              includePositions: true
+              includeConfidence: false,
+              includePositions: false,
+              useSegmentation: false,
+              segmentationThreshold: 0.5,
+              maxPagesPerSegment: 5,
+              skipClassification: false,
             });
             
             if (!extractionResult.isSuccess) {
