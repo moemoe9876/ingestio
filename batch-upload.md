@@ -214,26 +214,26 @@
 
 ---
 
-Okay, let's refine the implementation plan starting from Step 8.2, incorporating the detailed requirements, UI insights from the screenshots, and clarifying the action flow.
-
-**Clarification on Action Files:**
-
-*   You are correct. `actions/batch/batchActions.ts` will be the primary file for user-initiated batch operations (creating the batch, fetching batch lists/details).
-*   `actions/ai/extraction-actions.ts` will remain the core logic for processing a *single* document's extraction via the AI. The background batch processor will *call* this action for each document in the batch.
-*   `actions/batch/batch-extraction-actions.ts` is indeed redundant for this flow and should be removed or repurposed.
-
----
-
-**Redesigned Batch Upload Implementation Plan (Continued)**
-
-**(Step 8.0 & 8.1 - Database Schema & UI Wizard - Assumed Completed as per previous plan)**
-
 ---
 
 **Step 8.2: Implement Batch Creation Server Action (`actions/batch/batchActions.ts`)**
 
-*   **Task**: Develop the `createBatchUploadAction` server action. This action is triggered when the user clicks "Submit Batch" in the UI Wizard (Step 3). It handles the initial setup of the batch job, including validation, file uploads, server-side page counting, and database record creation, before handing off to the background processor.
-*   **Goal**: Securely and atomically create the batch record and associated document records, validate user permissions and limits, upload files to storage, accurately count pages, associate the correct prompts, and queue the batch for background processing.
+*   **Task**: Develop the `createBatchUploadAction` server action. This action is triggered when the user clicks "Submit Batch" in the UI Wizard (Step 3). It handles the initial setup of the batch job, including validation, file uploads, server-side page counting, and database record creation, before handing off to the background processor.Ensure the createBatchUploadAction server action correctly receives and processes the batchName.
+*   **Goal**: Securely and atomically create the batch record and associated document records, validate user permissions and limits, upload files to storage, accurately count pages, associate the correct prompts, and queue the batch for background processing. The server action should save the user-provided batch name to the database.
+* Create Batch Record:The existing logic userId: userId, name: batchName, ... for tx.insert(extractionBatchesTable) is correct for saving the name.
+
+* Analytics:
+Modify the trackServerEvent call to include batchName if available:
+
+await trackServerEvent('batch_created', userId, { 
+  batchId, 
+  batchName: batchName || 'Untitled Batch', // Provide a fallback for analytics
+  fileCount: successfulUploads, 
+  totalPages: totalBatchPages, 
+  promptStrategy 
+}) 
+
+
 *   **File**: `actions/batch/batchActions.ts`
 *   **Inputs**: `formData: FormData` (containing `files: File[]`, `batchName?: string`, `promptStrategy: 'global' | 'per_document' | 'auto'`, `globalPrompt?: string`, `perDocPrompts?: string` (JSON stringified `Record<string, string>`)).
 *   **Outputs**: `ActionState<{ batchId: string }>` on success, or error `ActionState`.
@@ -242,7 +242,7 @@ Okay, let's refine the implementation plan starting from Step 8.2, incorporating
     2.  **Authentication**: Call `getCurrentUser()` from `lib/auth-utils.ts` to get `userId`. Return error `ActionState` if unauthorized.
     3.  **FormData Parsing**:
         *   Extract `files` array (`formData.getAll("files")`).
-        *   Extract `batchName` (optional).
+        *   Extract `batchName`.
         *   Extract `promptStrategy`.
         *   Conditionally extract `globalPrompt` if `promptStrategy === 'global'`.
         *   Conditionally extract and `JSON.parse` `perDocPrompts` if `promptStrategy === 'per_document'`. Handle potential parsing errors.
@@ -384,8 +384,8 @@ Okay, let's refine the implementation plan starting from Step 8.2, incorporating
 
 **Step 9.0: Implement Post-Upload UI (Batch List/Detail & Enhanced Review)**
 
-*   **Task**: Create the user interface for monitoring batch progress, viewing results, and reviewing/editing/confirming individual document extractions, incorporating ideas from the provided screenshots.
-*   **Goal**: Provide a clear, interactive, and efficient UI for users to manage their batch uploads and extracted data.
+*   **Task**: Create the user interface for monitoring batch progress, viewing results, and reviewing/editing/confirming individual document extractions, incorporating ideas from the provided screenshots. Ensure the batch name is displayed in the UI where users manage and view their batches.
+*   **Goal**: Provide a clear, interactive, and efficient UI for users to manage their batch uploads and extracted data. Allow users to easily identify their batches by the name they provided.
 
 *   **9.1: Batch List Page (`/dashboard/batches`)**
     *   **File**: `app/(dashboard)/dashboard/batches/page.tsx` (Server Component), `components/batch/BatchListClient.tsx` (Client Component).
@@ -410,6 +410,13 @@ Okay, let's refine the implementation plan starting from Step 8.2, incorporating
                 *   Actions (`DropdownMenu`: View Details, Delete Batch - with confirmation).
             *   **Pagination:** Use Shadcn `Pagination` component, controlled by `currentPage` state and `totalCount`. Trigger refetch on page change.
             *   **Loading/Error/Empty States:** Implement using `Skeleton` and `Alert`. Provide clear messages and a CTA to upload if no batches exist.
+
+        * File: components/batch/BatchListClient.tsx (or equivalent).
+Objective: Display the batch name prominently.
+UI (DataTable Column):
+Modify the "Batch Name/ID" column. It should display batch.name if it exists and is not empty. If batch.name is null or empty, fall back to displaying the batch.id (or a truncated version).
+Example logic for display: batch.name || batch.id.substring(0, 8) + '...'.
+Filtering/Sorting: If desired, add the ability to filter/sort by the name column. This would require fetchUserBatchListAction to support sorting/filtering by the name field in extraction_batches.    
 
 *   **9.2: Batch Detail Page (`/dashboard/batches/[batchId]`)**
     *   **File**: `app/(dashboard)/dashboard/batches/[batchId]/page.tsx` (Server Component), `components/batch/BatchDetailClient.tsx` (Client Component).
@@ -437,6 +444,11 @@ Okay, let's refine the implementation plan starting from Step 8.2, incorporating
             *   **Selection Action Bar:** Appears when checkboxes are selected. Buttons: "Redo Files", "Delete Files", "Export As...". (Screenshot: Selection bar).
             *   **Document Pagination:** Implement if needed based on `fetchDocumentsForBatchAction` results.
             *   Handle loading/error/empty states for the document list.
+
+            * File: components/batch/BatchDetailClient.tsx (or equivalent).
+Objective: Display the batch name in the header of the detail page.
+UI (Batch Header):
+Ensure the batch header prominently displays batchDetails.name. If it's null, you might display "Untitled Batch" or the batchId.
 
 *   **9.3: Enhance Review Page (`/dashboard/review/[id]`)**
     *   **File**: `app/(dashboard)/dashboard/review/[id]/page.tsx` (Client Component - likely needs conversion if it's currently Server).

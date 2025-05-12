@@ -13,13 +13,14 @@ interface FileItem {
 }
 
 interface BatchReviewProps {
+  batchName?: string
   files: FileItem[]
   promptStrategy: "global" | "per-document" | "auto-detect"
   globalPrompt: string
   perDocumentPrompts: Record<string, string>
 }
 
-export function BatchReview({ files, promptStrategy, globalPrompt, perDocumentPrompts }: BatchReviewProps) {
+export function BatchReview({ batchName, files, promptStrategy, globalPrompt, perDocumentPrompts }: BatchReviewProps) {
   const [showPromptDetails, setShowPromptDetails] = useState(false)
   const [showFileList, setShowFileList] = useState(false)
 
@@ -53,7 +54,13 @@ export function BatchReview({ files, promptStrategy, globalPrompt, perDocumentPr
         </CardHeader>
 
         <CardContent className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
+            {batchName && (
+              <div className="bg-muted/50 p-4 rounded-md">
+                <div className="text-sm text-muted-foreground">Batch Name</div>
+                <div className="text-xl font-semibold mt-1 truncate" title={batchName}>{batchName}</div>
+              </div>
+            )}
             <div className="bg-muted/50 p-4 rounded-md">
               <div className="text-sm text-muted-foreground">Files</div>
               <div className="text-2xl font-semibold mt-1">{files.length}</div>

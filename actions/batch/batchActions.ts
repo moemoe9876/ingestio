@@ -2,20 +2,19 @@
 
 import { ZodError } from "zod";
 // @ts-ignore - Suppress persistent type error for pdf-lib
+import { eq } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
 import { v4 as uuidv4 } from 'uuid';
-import { eq } from 'drizzle-orm';
 
 import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
 import { checkUserQuotaAction } from "@/actions/db/user-usage-actions";
 import { db } from "@/db/db"; // Add db import
-import { extractionBatchesTable } from "@/db/schema/extraction-batches-schema"; // Add batch schema import
 import { documentsTable } from "@/db/schema/documents-schema"; // Add document schema import
+import { extractionBatchesTable } from "@/db/schema/extraction-batches-schema"; // Add batch schema import
 import { getCurrentUser } from "@/lib/auth-utils";
 import { subscriptionPlans } from "@/lib/config/subscription-plans";
-import { uploadToStorage } from "@/lib/supabase/storage-utils"; // Add storage import
-import { trackServerEvent } from "@/lib/analytics/server"; // Add analytics import
 import { checkRateLimit } from "@/lib/rate-limiting/limiter";
+import { uploadToStorage } from "@/lib/supabase/storage-utils"; // Add storage import
 import type { ActionState } from "@/types/server-action-types";
 
 

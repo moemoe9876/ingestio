@@ -1,15 +1,20 @@
 "use client"
 
+import { createBatchUploadAction } from "@/actions/batch/batchActions"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { getPlanById, PlanId } from "@/lib/config/subscription-plans"
+import { cn } from "@/lib/utils"
 import { formatFileSize } from "@/lib/utils/format-file-size"
 import { StripeCustomerDataKV } from "@/types/stripe-kv-types"
-import { AlertCircle, FileText, Image as ImageIcon, UploadCloud, X } from "lucide-react"
+import { AlertCircle, FileText, Image as ImageIcon, Upload, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useState, useTransition } from "react"
 import { FileRejection, useDropzone } from "react-dropzone"
+import { toast } from "sonner"
 import { BatchReview } from "./batch-review"
 import { PlanInfo } from "./plan-info"
 import { PromptConfiguration } from "./prompt-configuration"
@@ -47,6 +52,7 @@ export default function BatchUploadWizard({
   const [batchFileLimit, setBatchFileLimit] = useState<number | null>(null)
   const [isLoadingSubscription, setIsLoadingSubscription] = useState(true)
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null)
+  const [batchName, setBatchName] = useState<string>("")
 
   useEffect(() => {
     if (initialSubscriptionData) {
@@ -102,50 +108,38 @@ export default function BatchUploadWizard({
   const handleNextStep = () => currentStep < 3 && setCurrentStep(currentStep + 1)
   const handlePreviousStep = () => currentStep > 1 && setCurrentStep(currentStep - 1)
   const handleSubmitBatch = () => {
-    startTransition(() => {
-      // In a real implementation, we would prepare FormData and call createBatchUploadAction
-      // For now we'll just simulate the data preparation that would happen
-      
-      // 1. Create FormData object
+    startTransition(async () => {
       const formData = new FormData();
-      
-      // 2. Add all the selected files
+
+      if (batchName.trim()) {
+        formData.append("batchName", batchName.trim());
+      }
+
       selectedFiles.forEach(file => {
         formData.append("files", file);
       });
-      
-      // 3. Add the prompt strategy
       formData.append("promptStrategy", promptStrategy);
-      
-      // 4. Conditionally add the global prompt or per-document prompts
+
       if (promptStrategy === "global") {
         formData.append("globalPrompt", globalPrompt);
       } else if (promptStrategy === "per-document") {
-        // Convert the per-document prompts object to a JSON string
-        formData.append("perDocumentPrompts", JSON.stringify(perDocPrompts));
+        formData.append("perDocPrompts", JSON.stringify(perDocPrompts));
       }
-      
-      console.log("Submitting batch with:", { 
-        fileCount: selectedFiles.length, 
-        promptStrategy, 
-        globalPrompt: promptStrategy === "global" ? globalPrompt : undefined,
-        perDocPromptCount: promptStrategy === "per-document" ? Object.keys(perDocPrompts).length : undefined
-      });
-      
-      // TODO: Call the actual server action with formData when implemented:
-      // createBatchUploadAction(formData)
-      //   .then(result => {
-      //     if (result.success) {
-      //       router.push('/dashboard/batches')
-      //     } else {
-      //       // Handle errors
-      //     }
-      //   })
-      
-      // For MVP, we'll just redirect to the batches page after a delay
-      setTimeout(() => {
-        router.push('/dashboard/batches')
-      }, 1000)
+
+      try {
+        toast.info("Submitting batch...", { duration: 5000 });
+        const result = await createBatchUploadAction(formData);
+
+        if (result.isSuccess) {
+          toast.success(result.message || "Batch submitted successfully!");
+          router.push(`/dashboard/batches/${result.data?.batchId}`);
+        } else {
+          toast.error(`Batch submission failed: ${result.message}`);
+        }
+      } catch (error) {
+        console.error("Batch submission error:", error);
+        toast.error("An unexpected error occurred during batch submission.");
+      }
     })
   }
 
@@ -198,44 +192,64 @@ export default function BatchUploadWizard({
     <div className="container mx-auto py-6 px-4 max-w-5xl">
       <div className="space-y-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">New Batch Upload</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-2xl">New Batch Upload</h1>
           <p className="mt-2 text-lg text-muted-foreground">
             Follow the steps below to upload and process your documents in bulk.
           </p>
         </div>
 
-        <PlanInfo plan={userPlanId || 'starter'} fileLimit={batchFileLimit || 0} />
+        <PlanInfo plan={userPlanId} fileLimit={batchFileLimit ?? 0} />
         <WizardNav currentStep={currentStep} />
 
         <Card className="shadow-lg border-border/80">
           <CardContent className="p-5 sm:p-6">
             {currentStep === 1 && (
               <div className="space-y-4">
-                <div 
-                  {...getRootProps()} 
-                  className={`relative group p-6 py-8 border-2 border-dashed rounded-xl text-center transition-colors duration-200 ease-in-out cursor-pointer 
-                    ${isDragActive 
-                      ? "border-primary bg-primary/10 dark:bg-primary/20 ring-2 ring-primary ring-offset-2 ring-offset-background"
-                      : "border-neutral-300 dark:border-neutral-600 hover:border-primary/70 dark:hover:border-primary/70 bg-background dark:bg-neutral-800/30"}`}
+                <div className="space-y-2">
+                  <Label htmlFor="batchName" className="text-sm font-medium">
+                    Batch Name
+                  </Label>
+                  <Input
+                    id="batchName"
+                    placeholder="e.g., Q4 Invoices, Client Onboarding Docs"
+                    value={batchName}
+                    onChange={(e) => setBatchName(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Give your batch a descriptive name for easier identification later.
+                  </p>
+                </div>
+
+                <div
+                  {...getRootProps()}
+                  className={cn(
+                    "min-h-[180px] p-6 rounded-lg",
+                    "transition-all duration-200 ease-in-out",
+                    "border-2 border-dashed cursor-pointer",
+                    "flex flex-col items-center justify-center gap-4",
+                    isDragActive ? "border-primary bg-primary/5 scale-[1.02]" : "border-muted-foreground/30 bg-secondary/30 hover:bg-secondary/50 hover:border-primary/50",
+                  )}
                 >
                   <input {...getInputProps()} />
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <UploadCloud className={`mx-auto h-12 w-12 mb-1 transition-transform duration-200 ease-in-out group-hover:scale-110 
-                      ${isDragActive ? "text-primary" : "text-neutral-400 dark:text-neutral-500 group-hover:text-primary/80"}`}
-                    />
-                    <p className="text-lg font-semibold text-foreground">
-                      Drag & drop files here
+                  <div className="flex flex-col items-center text-center">
+                    <div className="upload-icon-container w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <Upload className="w-8 h-8 text-primary" />
+                    </div>
+                    <h4 className="text-base font-medium text-foreground mb-1">
+                      {isDragActive
+                        ? "Drop files here to upload"
+                        : "Drag & Drop your file(s) here"}
+                    </h4>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      Upload PDF, PNG or JPEG files for your batch.
                     </p>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      Upload your PDF, JPG, or PNG files to begin processing.
-                    </p>
-                    <Button 
-                      type="button" 
-                      variant="default" 
-                      size="lg" 
-                      className="bg-black text-white hover:bg-black/90 dark:bg-black dark:text-white dark:hover:bg-black/90 font-medium"
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      type="button"
                     >
-                      Select Files to Upload
+                      Browse Files
                     </Button>
                   </div>
                 </div>
@@ -263,6 +277,7 @@ export default function BatchUploadWizard({
             
             {currentStep === 3 && (
               <BatchReview 
+                batchName={batchName}
                 files={selectedFiles.map(f => ({
                   name: f.name,
                   size: f.size,
@@ -287,7 +302,7 @@ export default function BatchUploadWizard({
 
         {(selectedFiles.length > 0 || fileRejections.length > 0) && currentStep === 1 && (
           <div className="space-y-2 pt-4 border-t border-border/60">
-            <h3 className="text-xl font-semibold text-foreground mb-3">Upload Queue ({validFileCount} valid)</h3>
+            <h3 className="text-lg font-semibold text-foreground mb-3">Upload Queue ({validFileCount} valid)</h3>
             <div className="max-h-[240px] overflow-y-auto space-y-2 pr-2 border border-border/60 rounded-md p-3">
               {selectedFiles.map(file => (
                 <Card key={`${file.name}-valid`} className="p-3 shadow-sm border-green-500/30 bg-green-500/5 dark:bg-green-500/10">
@@ -327,7 +342,7 @@ export default function BatchUploadWizard({
         
         <div className="flex items-center mt-6 pt-4 border-t border-border/60">
           {currentStep > 1 ? (
-            <Button variant="outline" onClick={handlePreviousStep} disabled={isPending} className="text-base py-2.5 px-6 border-black text-black hover:bg-black/10">
+            <Button variant="outline" onClick={handlePreviousStep} disabled={isPending} className="py-2.5 px-6 border-black text-black hover:bg-black/10">
               {currentStep === 2 ? "Back to Files" : "Back to Prompts"}
             </Button>
           ) : (
@@ -339,14 +354,14 @@ export default function BatchUploadWizard({
               <Button 
                 onClick={handleNextStep}
                 disabled={
-                  (currentStep === 1 && validFileCount === 0) ||
+                  (currentStep === 1 && (validFileCount === 0 || !batchName.trim())) ||
                   (currentStep === 2 && (
                     (promptStrategy === "global" && !globalPrompt.trim()) ||
                     (promptStrategy === "per-document" && selectedFiles.some(f => !(perDocPrompts[f.name] && perDocPrompts[f.name].trim())))
                   )) ||
                   isPending
                 }
-                className="text-base py-2.5 px-6 bg-black text-white hover:bg-black/90 disabled:bg-gray-300"
+                className="py-2.5 px-6 bg-black text-white hover:bg-black/90 disabled:bg-gray-300"
                 size="lg"
               >
                 {currentStep === 1 ? "Next: Configure Prompts" : "Next: Review Batch"}
@@ -355,7 +370,7 @@ export default function BatchUploadWizard({
               <Button 
                 onClick={handleSubmitBatch}
                 disabled={isPending || validFileCount === 0}
-                className="text-base py-2.5 px-6 font-semibold bg-black text-white hover:bg-black/90 disabled:bg-gray-300"
+                className="py-2.5 px-6 font-semibold bg-black text-white hover:bg-black/90 disabled:bg-gray-300"
                 size="lg"
               >
                 {isPending ? (
