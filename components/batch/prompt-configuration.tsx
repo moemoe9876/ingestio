@@ -15,8 +15,8 @@ interface FileItem {
 }
 
 interface PromptConfigurationProps {
-  promptStrategy: "global" | "per-document" | "auto-detect"
-  setPromptStrategy: Dispatch<SetStateAction<"global" | "per-document" | "auto-detect">>
+  promptStrategy: "global" | "per-document" | "auto"
+  setPromptStrategy: Dispatch<SetStateAction<"global" | "per-document" | "auto">>
   globalPrompt: string
   setGlobalPrompt: Dispatch<SetStateAction<string>>
   perDocumentPrompts: Record<string, string>
@@ -53,7 +53,7 @@ export function PromptConfiguration({
 
         <RadioGroup
           value={promptStrategy}
-          onValueChange={(value) => setPromptStrategy(value as "global" | "per-document" | "auto-detect")}
+          onValueChange={(value) => setPromptStrategy(value as "global" | "per-document" | "auto")}
           className="space-y-3"
         >
           <div className="flex items-start space-x-2">
@@ -77,7 +77,7 @@ export function PromptConfiguration({
           </div>
 
           <div className="flex items-start space-x-2">
-            <RadioGroupItem value="auto-detect" id="auto-detect" className="mt-1" />
+            <RadioGroupItem value="auto" id="auto-detect" className="mt-1" />
             <div className="grid gap-1">
               <Label htmlFor="auto-detect" className="font-medium">
                 Auto-Detect & Prompt
@@ -140,7 +140,7 @@ export function PromptConfiguration({
           </div>
         )}
 
-        {promptStrategy === "auto-detect" && (
+        {promptStrategy === "auto" && (
           <div className="space-y-3 p-4 bg-gray-50 rounded-md">
             <h3 className="text-base font-medium">Auto-Detect & Prompt</h3>
             <p className="text-sm text-gray-600">

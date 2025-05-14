@@ -53,7 +53,7 @@ async function _processAndPrepareDocument(
 
   try {
     const uploadResult = await uploadToStorage(
-      process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET!,
+      process.env.DOCUMENTS_BUCKET!,
       storagePath,
       fileNodeBuffer,
       file.type

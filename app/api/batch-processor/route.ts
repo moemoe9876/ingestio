@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
               resolvedPrompt = doc.extractionPrompt;
             } else {
               console.log(`Auto-detecting prompt for doc ${doc.id}, path: ${doc.storagePath}`);
-              const downloadResult = await downloadFromStorage(process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET!, doc.storagePath);
+              const downloadResult = await downloadFromStorage(process.env.DOCUMENTS_BUCKET!, doc.storagePath);
               
               if (!downloadResult.success || !downloadResult.data) {
                  docProcessingError = downloadResult.error || "Failed to download document for auto-prompt classification.";

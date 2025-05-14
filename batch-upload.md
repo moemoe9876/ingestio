@@ -617,7 +617,7 @@ Okay, here are the specific instructions for implementing the recommendations we
 
       try {
         const uploadResult = await uploadToStorage(
-          process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET!,
+          process.env.DOCUMENTS_BUCKET!,
           storagePath,
           fileNodeBuffer,
           file.type
