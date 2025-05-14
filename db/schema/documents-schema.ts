@@ -29,6 +29,7 @@ export const documentsTable = pgTable("documents", {
   // Add extraction_prompt for per-document prompts
   extractionPrompt: text("extraction_prompt"),
   status: documentStatusEnum("status").default("uploaded").notNull(),
+  errorMessage: text("error_message"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()

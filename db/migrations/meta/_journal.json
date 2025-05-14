@@ -36,6 +36,13 @@
       "when": 1746762633759,
       "tag": "0004_swift_polaris",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1747246023548,
+      "tag": "0005_groovy_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

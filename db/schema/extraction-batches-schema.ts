@@ -5,11 +5,11 @@ Defines the schema for extraction batches.
 */
 
 import {
-    integer, // Import pgEnum
-    pgTable,
-    text,
-    timestamp,
-    uuid
+  integer, // Import pgEnum
+  pgTable,
+  text,
+  timestamp,
+  uuid
 } from "drizzle-orm/pg-core";
 import { batchStatusEnum, promptStrategyEnum } from "./enums"; // Import from enums.ts
 import { profilesTable } from "./profiles-schema";
@@ -38,7 +38,6 @@ export const extractionBatchesTable = pgTable("extraction_batches", {
     .$onUpdate(() => new Date()),
   // Add completedAt
   completedAt: timestamp("completed_at"),
-  lastErrorMessage: text("last_error_message"),
 });
 // Remove the old statusCheck constraint
 

@@ -5,6 +5,8 @@
  * It focuses on document type classification before targeted extraction.
  */
 
+import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
+import { generateObject } from "ai";
 import { z } from "zod";
 
 /**
@@ -66,6 +68,85 @@ Analyze the provided document and return a JSON object with the following struct
   "confidence": <float 0.0-1.0>,
   "reasoning": "<brief explanation>"
 }`;
+}
+
+/**
+ * Classifies a document based on its content.
+ *
+ * @param fileContent The content of the file as a Blob.
+ * @param mimeType The MIME type of the file.
+ * @returns A promise that resolves to the classification response.
+ */
+export async function classifyDocument(
+  fileContent: Blob,
+  mimeType: string
+  // traceId?: string, // Optional traceId if you want to link it to a broader trace
+): Promise<ClassificationResponse> {
+  console.log(`[classifyDocument] Received file of type ${mimeType}, size ${fileContent.size}.`);
+  
+  const defaultResponse: ClassificationResponse = {
+    documentType: "other",
+    confidence: 0.1, 
+    reasoning: "Classification failed or produced invalid output."
+  };
+
+  try {
+    const classificationPrompt = getClassificationPrompt();
+    const arrayBuffer = await fileContent.arrayBuffer();
+    const fileBase64 = Buffer.from(arrayBuffer).toString('base64');
+
+    // Optional: PostHog tracing for this specific classification call
+    // const phClient = getPostHogServerClient();
+    // const currentTraceId = traceId || randomUUID(); 
+    // const observableModel = withTracing(
+    //   getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH),
+    //   phClient,
+    //   {
+    //     posthogDistinctId: currentTraceId, // Or a userId if available and relevant
+    //     posthogProperties: {
+    //       actionName: "prompts/classifyDocument",
+    //       mimeType: mimeType
+    //     }
+    //   }
+    // );
+
+    const model = getVertexStructuredModel(VERTEX_MODELS.GEMINI_2_0_FLASH); // Using base model directly
+
+    const result = await generateObject({
+      model: model, // Use observableModel if tracing is enabled
+      schema: ClassificationResponseSchema,
+      messages: [
+        {
+          role: "system",
+          content: CLASSIFICATION_SYSTEM_INSTRUCTIONS
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: classificationPrompt },
+            { type: "file", data: Buffer.from(fileBase64, 'base64'), mimeType: mimeType }
+          ]
+        }
+      ],
+      temperature: 0.1, // From extraction-actions classification
+    });
+    
+    const validatedResult = ClassificationResponseSchema.safeParse(result.object);
+    
+    if (validatedResult.success) {
+      console.log("[classifyDocument] Classification successful:", validatedResult.data);
+      return validatedResult.data;
+    } else {
+      console.error("[classifyDocument] AI response failed Zod validation:", validatedResult.error);
+      defaultResponse.reasoning = `Classification failed Zod validation: ${validatedResult.error.message}`;
+      return defaultResponse;
+    }
+
+  } catch (error: any) {
+    console.error("[classifyDocument] Error during AI call or processing:", error);
+    defaultResponse.reasoning = error.message || "Unknown error during classification AI call.";
+    return defaultResponse;
+  }
 }
 
 /**

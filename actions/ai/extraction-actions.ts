@@ -127,6 +127,7 @@ type ResumeData = z.infer<typeof resumeSchema>;
 // Define input validation schema for document extraction
 const extractDocumentSchema = z.object({
   documentId: z.string().uuid(),
+  batchId: z.string().uuid().optional(), // Added for batch processing context
   extractionPrompt: z.string().min(0).max(1000).optional(),
   includeConfidence: z.boolean().optional().default(true),
   includePositions: z.boolean().optional().default(true),
@@ -317,7 +318,8 @@ export async function extractDocumentDataAction(
     
     // Use the parsed input with our defaults
     const { 
-      documentId, 
+      documentId,
+      batchId, // Destructure batchId
       extractionPrompt,
       includeConfidence,
       includePositions,
@@ -401,12 +403,13 @@ export async function extractDocumentDataAction(
     }
 
     // Create extraction job
-    // @ts-ignore - Potential schema type mismatch 
+    // @ts-ignore - Potential schema type mismatch
     const { data: extractionJob, error: jobError } = await supabase
       .from('extraction_jobs')
       .insert({
         user_id: userId,
         document_id: documentId,
+        batch_id: batchId, // Include batch_id if present
         status: "processing",
         extraction_prompt: extractionPrompt,
         extraction_options: {
