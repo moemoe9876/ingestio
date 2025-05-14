@@ -218,7 +218,7 @@
 
 **Step 8.2: Implement Batch Creation Server Action (`actions/batch/batchActions.ts`)**
 
-*   **Task**: Develop the `createBatchUploadAction` server action. This action is triggered when the user clicks "Submit Batch" in the UI Wizard (Step 3). It handles the initial setup of the batch job, including validation, file uploads, server-side page counting, and database record creation, before handing off to the background processor.Ensure the createBatchUploadAction server action correctly receives and processes the batchName.
+*  [x]  **Task**: Develop the `createBatchUploadAction` server action. This action is triggered when the user clicks "Submit Batch" in the UI Wizard (Step 3). It handles the initial setup of the batch job, including validation, file uploads, server-side page counting, and database record creation, before handing off to the background processor.Ensure the createBatchUploadAction server action correctly receives and processes the batchName.
 *   **Goal**: Securely and atomically create the batch record and associated document records, validate user permissions and limits, upload files to storage, accurately count pages, associate the correct prompts, and queue the batch for background processing. The server action should save the user-provided batch name to the database.
 * Create Batch Record:The existing logic userId: userId, name: batchName, ... for tx.insert(extractionBatchesTable) is correct for saving the name.
 
@@ -574,3 +574,269 @@ Verifying specific error messages are displayed correctly for different failure 
 
 
 
+
+
+
+
+
+
+
+Okay, here are the specific instructions for implementing the recommendations we discussed for `actions/batch/batchActions.ts` and related files.
+
+**Recommendation 1: Function Length **
+
+*  
+*   **Consideration:** If the file processing loop within `db.transaction` in `createBatchUploadAction` becomes significantly more complex, extract it into a private async helper function within `actions/batch/batchActions.ts`.
+
+    ```typescript
+    // In actions/batch/batchActions.ts
+
+    // Example structure for the helper (details depend on your exact logic)
+    async function _processAndPrepareDocument(
+      file: File,
+      userId: string,
+      currentBatchId: string,
+      promptStrategy: 'global' | 'per_document' | 'auto',
+      perDocPromptsMap: Record<string, string>
+    ): Promise<{ success: boolean; dbData?: typeof documentsTable.$inferInsert; pageCount?: number; error?: string }> {
+      const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const uniqueFilename = `${uuidv4()}-${sanitizedFilename}`;
+      const storagePath = `batches/${userId}/${currentBatchId}/${uniqueFilename}`;
+      let fileNodeBuffer: Buffer;
+      let pageCount: number;
+
+      try {
+        const fileArrayBuffer = await file.arrayBuffer();
+        fileNodeBuffer = Buffer.from(fileArrayBuffer);
+        // Assuming getPageCount is defined elsewhere and imported
+        pageCount = await getPageCount(file, fileArrayBuffer); 
+      } catch (countError: any) {
+        console.error(`Failed to get page count for ${file.name}:`, countError.message);
+        return { success: false, error: `Page count failed: ${countError.message}` };
+      }
+
+      try {
+        const uploadResult = await uploadToStorage(
+          process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET!,
+          storagePath,
+          fileNodeBuffer,
+          file.type
+        );
+
+        if (!uploadResult.success || !uploadResult.data?.path) {
+          return { success: false, error: `Upload failed: ${uploadResult.error || "Missing path"}` };
+        }
+
+        let docPrompt: string | null = null;
+        if (promptStrategy === 'per_document') {
+          docPrompt = perDocPromptsMap[file.name] || null;
+          if (!docPrompt) {
+            return { success: false, error: `Missing prompt for ${file.name} (per-document strategy)`};
+          }
+        }
+        // 'global' and 'auto' strategies will have docPrompt as null here,
+        // as the global prompt is on the batch, and auto-prompt is resolved by the processor.
+
+        return {
+          success: true,
+          dbData: {
+            userId: userId,
+            batchId: currentBatchId,
+            originalFilename: file.name,
+            storagePath: uploadResult.data.path,
+            mimeType: file.type,
+            fileSize: file.size,
+            pageCount: pageCount,
+            extractionPrompt: docPrompt, // This will be null for 'global' and 'auto'
+            status: 'uploaded',
+          },
+          pageCount: pageCount,
+        };
+
+      } catch (fileProcessingError: any) {
+         return { success: false, error: `File processing error: ${fileProcessingError.message}` };
+      }
+    }
+
+    // Then in createBatchUploadAction:
+    // ...
+    // for (const file of files) {
+    //   const result = await _processAndPrepareDocument(file, userId, currentBatchId, promptStrategy, perDocPromptsMap);
+    //   if (result.success && result.dbData && result.pageCount !== undefined) {
+    //     documentInsertData.push(result.dbData);
+    //     totalBatchPages += result.pageCount;
+    //     successfulUploads++;
+    //   } else {
+    //     filesFailedInitialProcessing++;
+    //     console.error(`Skipping file ${file.name} due to error: ${result.error}`);
+    //   }
+    // }
+    // ...
+    ```
+
+---
+
+**Recommendation 2: Subscription Data Source (High Priority)**
+
+*   **Goal:** Use `getUserSubscriptionDataKVAction` in `createBatchUploadAction` to determine `userTier` for more reliable entitlement checks.
+
+*   **Step 2.1: Modify `actions/batch/batchActions.ts`**
+    1.  Import `getUserSubscriptionDataKVAction`:
+        ```typescript
+        import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
+        ```
+    2.  Replace the `getProfileByUserIdAction` call for tier validation with `getUserSubscriptionDataKVAction`:
+
+        ```typescript
+        // Inside createBatchUploadAction, after FormData Parsing
+
+        // 3. Subscription & Tier Validation
+        const subscriptionResult = await getUserSubscriptionDataKVAction(); // No userId needed if it gets from auth internally
+                                                                        // If it needs userId, pass it: await getUserSubscriptionDataKVAction(userId);
+        if (!subscriptionResult.isSuccess) {
+          return {
+            isSuccess: false,
+            message: subscriptionResult.message || "Failed to fetch user subscription data for tier validation.",
+            error: "SUBSCRIPTION_FETCH_FAILED_TIER_VALIDATION",
+          };
+        }
+        
+        let userTier: SubscriptionTier = "starter"; // Default to starter
+        const subData = subscriptionResult.data;
+
+        if (subData.status === 'active' && subData.planId) {
+            userTier = validateTier(subData.planId) as SubscriptionTier;
+        } else if (subData.status === 'trialing' && subData.planId) {
+            // Also consider 'trialing' as an active subscription for tier benefits
+            userTier = validateTier(subData.planId) as SubscriptionTier;
+        }
+        // If status is 'none', 'canceled', 'past_due', etc., userTier remains 'starter'
+
+        // ... (rest of the tier validation logic using userTier and planDetails remains the same)
+        // if (userTier === "starter") { ... }
+        // const planDetails = subscriptionPlans[userTier];
+        // ...
+        ```
+
+*   **Step 2.2: Verify `getUserSubscriptionDataKVAction`**
+    *   Ensure `actions/stripe/sync-actions.ts` -> `getUserSubscriptionDataKVAction` correctly fetches the current authenticated user's ID if no `userIdOfBillingUser` is passed. It currently does: `const userId = userIdOfBillingUser ?? await getCurrentUser();`. This is good.
+    *   Confirm that your Stripe webhook handlers in `actions/stripe/webhook-actions.ts` are reliably updating the Redis KV store via `syncStripeDataToKV` and subsequently updating `profilesTable.membership` via `updateProfileByStripeCustomerIdAction`. The order should be: Stripe Event -> Webhook -> `syncStripeDataToKV` (updates Redis) -> `updateProfileByStripeCustomerIdAction` (updates `profiles` table). This ensures `profilesTable.membership` can serve as a reliable fallback if KV fails, but KV is primary.
+
+---
+
+**Recommendation 3: Analytics Placeholder (Standard Practice)**
+
+*   **Goal:** Ensure `trackServerEvent` correctly sends data to PostHog.
+*   **Step 3.1: Verify PostHog Configuration**
+    1.  In your `.env.local` (and corresponding Vercel environment variables for production), ensure `NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` (if not using the default US host) are correctly set.
+    2.  The implementation in `lib/analytics/server.ts` for `getPostHogServerClient()` and `trackServerEvent()` looks correct.
+        ```typescript
+        // lib/analytics/server.ts - Excerpt (already good)
+        export async function trackServerEvent(
+          eventName: string, 
+          userId: string, 
+          properties?: Record<string, any>
+        ) {
+          try {
+            const client = getPostHogServerClient(); // This initializes PostHog
+            await client.capture({ // This sends the event
+              distinctId: userId,
+              event: eventName,
+              properties
+            });
+          } catch (error) {
+            console.error("Failed to track server event:", error);
+          }
+        }
+        ```
+    3.  **Test:** After deploying these changes (or locally with env vars set), trigger the `createBatchUploadAction` and verify in your PostHog dashboard that the `batch_created` event appears with the correct properties.
+
+*   **Step 3.2: Update `createBatchUploadAction` Analytics Call (Already in your plan)**
+    *   Ensure the `batchName` is included in the properties sent to `trackServerEvent`.
+        ```typescript
+        // In createBatchUploadAction, after successful transaction:
+        console.log(`Analytics: trackServerEvent('batch_created', ${userId}, { batchId: ${batchId}, batchName: '${batchName || 'Untitled Batch'}', fileCount: ${successfulUploads}, totalPages: ${totalBatchPages}, promptStrategy: '${promptStrategy}' })`);
+        // Replace console.log with actual call:
+        await trackServerEvent('batch_created', userId, {
+            batchId: batchId,
+            batchName: batchName || 'Untitled Batch', // Provide a fallback for analytics
+            fileCount: successfulUploads,
+            totalPages: totalBatchPages,
+            promptStrategy: promptStrategy
+        });
+        ```
+
+---
+
+**Recommendation 4: Error Message in Transaction Catch (Improved Debugging)**
+
+*   **Goal:** Store the last critical error message on the `extraction_batches` table.
+
+*   **Step 4.1: Modify Database Schema**
+    1.  Open `db/schema/extraction-batches-schema.ts`.
+    2.  Add a new nullable text column for the error message:
+        ```typescript
+        // db/schema/extraction-batches-schema.ts
+        import {
+          integer,
+          pgTable,
+          text, // Ensure text is imported
+          timestamp,
+          uuid
+        } from "drizzle-orm/pg-core";
+        import { batchStatusEnum, promptStrategyEnum } from "./enums";
+        import { profilesTable } from "./profiles-schema";
+
+        export const extractionBatchesTable = pgTable("extraction_batches", {
+          // ... existing columns ...
+          totalPages: integer("total_pages").default(0).notNull(),
+          createdAt: timestamp("created_at").defaultNow().notNull(),
+          updatedAt: timestamp("updated_at")
+            .defaultNow()
+            .notNull()
+            .$onUpdate(() => new Date()),
+          completedAt: timestamp("completed_at"),
+          lastErrorMessage: text("last_error_message"), // <-- ADD THIS LINE
+        });
+        ```
+    3.  Generate and apply the migration:
+        *   Run `pnpm drizzle-kit generate`
+        *   Review the generated SQL migration file (it should add the `last_error_message` column).
+        *   Run `pnpm drizzle-kit migrate` (or apply SQL manually in production).
+
+*   **Step 4.2: Update `createBatchUploadAction` Transaction Catch Block**
+    1.  Modify the `catch (transactionError: any)` block in `actions/batch/batchActions.ts`:
+        ```typescript
+        // In actions/batch/batchActions.ts
+        // ...
+        } catch (transactionError: any) {
+           console.error("Batch creation transaction or post-transaction step failed:", transactionError.message);
+           if (batchId) { // batchId might be null if error occurred before batch record creation
+               try {
+                   const errorMessageToStore = transactionError.message 
+                                               ? transactionError.message.substring(0, 1000) // Truncate to prevent overly long messages
+                                               : "Unknown transaction error";
+                   await db.update(extractionBatchesTable)
+                       .set({ 
+                           status: 'failed', 
+                           updatedAt: new Date(),
+                           lastErrorMessage: errorMessageToStore // Store the error message
+                       })
+                       .where(eq(extractionBatchesTable.id, batchId));
+                   console.log(`Marked batch ${batchId} as failed due to error: ${errorMessageToStore}`);
+               } catch (updateError: any) {
+                   console.error(`Failed to mark batch ${batchId} as failed and store error message after transaction error: ${updateError.message}`);
+               }
+           }
+           return {
+               isSuccess: false,
+               message: transactionError.message || "Failed to create batch due to a server error.",
+               error: "TRANSACTION_OR_POST_TRANSACTION_ERROR",
+           };
+        }
+        // ...
+        ```
+
+---
+
+By implementing these instructions, your `createBatchUploadAction` will be more robust in its tier validation, provide better analytics, and offer improved debuggability for batch creation failures. Remember to test these changes thoroughly.

@@ -3,56 +3,171 @@
 import { ZodError } from "zod";
 // @ts-ignore - Suppress persistent type error for pdf-lib
 import { eq } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache'; // Added for revalidation
 import { PDFDocument } from 'pdf-lib';
 import { v4 as uuidv4 } from 'uuid';
 
-import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
-import { checkUserQuotaAction } from "@/actions/db/user-usage-actions";
-import { db } from "@/db/db"; // Add db import
-import { documentsTable } from "@/db/schema/documents-schema"; // Add document schema import
-import { extractionBatchesTable } from "@/db/schema/extraction-batches-schema"; // Add batch schema import
+import { checkUserQuotaAction } from "@/actions/db/user-usage-actions"; // Assuming getUserSubscriptionDataKVAction exists or is similar to getProfileByUserIdAction for tier data
+import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions"; // Added for Recommendation 2
+import { db } from "@/db/db";
+import { documentsTable } from "@/db/schema/documents-schema";
+import { extractionBatchesTable } from "@/db/schema/extraction-batches-schema";
+import { trackServerEvent } from "@/lib/analytics/server"; // Corrected import path
 import { getCurrentUser } from "@/lib/auth-utils";
 import { subscriptionPlans } from "@/lib/config/subscription-plans";
-import { checkRateLimit } from "@/lib/rate-limiting/limiter";
-import { uploadToStorage } from "@/lib/supabase/storage-utils"; // Add storage import
+import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter"; // Added validateTier and SubscriptionTier
+import { uploadToStorage } from "@/lib/supabase/storage-utils";
 import type { ActionState } from "@/types/server-action-types";
 
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 
-const BATCH_PROCESSING_LIMIT_PLUS = subscriptionPlans["plus"]?.batchProcessingLimit || 25;
-const BATCH_PROCESSING_LIMIT_GROWTH = subscriptionPlans["growth"]?.batchProcessingLimit || 100;
-
-// Define a type for the successful data payload (adjust as needed)
+// Define a type for the successful data payload
 type CreateBatchUploadSuccessData = {
   batchId: string;
 };
+
+// Helper function to process and prepare a single document
+async function _processAndPrepareDocument(
+  file: File,
+  userId: string,
+  currentBatchId: string,
+  promptStrategy: 'global' | 'per_document' | 'auto',
+  perDocPromptsMap: Record<string, string>,
+  getPageCountFunc: (file: File, fileArrayBuffer?: ArrayBuffer) => Promise<number> // Pass getPageCount as an argument
+): Promise<{ success: boolean; dbData?: typeof documentsTable.$inferInsert; pageCount?: number; error?: string }> {
+  const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const uniqueFilename = `${uuidv4()}-${sanitizedFilename}`;
+  const storagePath = `batches/${userId}/${currentBatchId}/${uniqueFilename}`;
+  let fileNodeBuffer: Buffer;
+  let pageCountValue: number;
+
+  try {
+    const fileArrayBuffer = await file.arrayBuffer();
+    fileNodeBuffer = Buffer.from(fileArrayBuffer);
+    pageCountValue = await getPageCountFunc(file, fileArrayBuffer);
+  } catch (countError: any) {
+    console.error(`Failed to get page count for ${file.name}:`, countError.message);
+    return { success: false, error: `Page count failed for ${file.name}: ${countError.message}` };
+  }
+
+  try {
+    const uploadResult = await uploadToStorage(
+      process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET!,
+      storagePath,
+      fileNodeBuffer,
+      file.type
+    );
+
+    if (!uploadResult.success || !uploadResult.data?.path) {
+      return { success: false, error: `Upload failed for ${file.name}: ${uploadResult.error || "Missing path"}`, pageCount: pageCountValue };
+    }
+
+    let docPrompt: string | null = null;
+    if (promptStrategy === 'per_document') {
+      docPrompt = perDocPromptsMap[file.name] || null;
+      if (!docPrompt) {
+        return { success: false, error: `Missing prompt for ${file.name} (per-document strategy)`, pageCount: pageCountValue };
+      }
+    }
+    // For 'global' and 'auto' strategies, docPrompt remains null at this stage.
+    // The global prompt is on the batch record, and auto-prompt is resolved by the background processor.
+
+    return {
+      success: true,
+      dbData: {
+        userId: userId,
+        batchId: currentBatchId,
+        originalFilename: file.name,
+        storagePath: uploadResult.data.path,
+        mimeType: file.type,
+        fileSize: file.size,
+        pageCount: pageCountValue,
+        extractionPrompt: docPrompt,
+        status: 'uploaded',
+      },
+      pageCount: pageCountValue,
+    };
+
+  } catch (fileProcessingError: any) {
+     return { success: false, error: `File processing error for ${file.name}: ${fileProcessingError.message}`, pageCount: pageCountValue };
+  }
+}
 
 export async function createBatchUploadAction(
   formData: FormData
 ): Promise<ActionState<CreateBatchUploadSuccessData | null>> {
   try {
-    // 1. Get User ID
+    // 1. Authentication
     const userId = await getCurrentUser();
-    if (!userId) {
-      return {
-        isSuccess: false,
-        message: "Authentication failed. Please log in.",
-        error: "AUTH_ERROR",
-      };
-    }
+    // Removed explicit error check for userId as getCurrentUser throws if not found
 
-    // 2. Extract Data from FormData
+    // 2. FormData Parsing
     const files = formData.getAll("files") as File[];
-    const batchName = (formData.get("batchName") as string) || null; // Optional
-    const extractionPrompt = formData.get("extractionPrompt") as string;
+    const batchName = (formData.get("batchName") as string) || null;
+    const promptStrategy = formData.get("promptStrategy") as 'global' | 'per_document' | 'auto';
+    const globalPrompt = formData.get("globalPrompt") as string | null;
+    const perDocPromptsString = formData.get("perDocPrompts") as string | null;
 
-    // 3. Basic Validation
-    if (!extractionPrompt) {
+    let perDocPromptsMap: Record<string, string> = {};
+    if (promptStrategy === 'per_document' && perDocPromptsString) {
+      try {
+        perDocPromptsMap = JSON.parse(perDocPromptsString);
+      } catch (error) {
+        return {
+          isSuccess: false,
+          message: "Invalid format for per-document prompts.",
+          error: "VALIDATION_ERROR_PER_DOC_PROMPT_FORMAT",
+        };
+      }
+    }
+
+    // 3. Subscription & Tier Validation
+    // const subscriptionData = await getUserSubscriptionDataKVAction(userId); // Ideal, but action not fully defined in context
+    // Using getProfileByUserIdAction as a substitute to get the tier (membership)
+    // const profileResult = await getProfileByUserIdAction(userId);
+    // if (!profileResult.isSuccess || !profileResult.data) {
+    //   return {
+    //     isSuccess: false,
+    //     message: profileResult.message || "Failed to fetch user profile for tier validation.",
+    //     error: profileResult.error || "PROFILE_FETCH_FAILED_TIER_VALIDATION",
+    //   };
+    // }
+    // const userTier = validateTier(profileResult.data.membership) as SubscriptionTier;
+
+    const subscriptionResult = await getUserSubscriptionDataKVAction(userId);
+    if (!subscriptionResult.isSuccess || !subscriptionResult.data) { // Ensure data exists
       return {
         isSuccess: false,
-        message: "Extraction prompt is required.",
-        error: "VALIDATION_ERROR_PROMPT_REQUIRED",
+        message: subscriptionResult.message || "Failed to fetch user subscription data for tier validation.",
+        error: "SUBSCRIPTION_FETCH_FAILED_TIER_VALIDATION", // Use specific error from recommendation
       };
     }
+
+    let userTier: SubscriptionTier = "starter"; // Default to starter
+    const subData = subscriptionResult.data;
+
+    if (subData.status === 'active' && subData.planId) {
+        userTier = validateTier(subData.planId) as SubscriptionTier;
+    } else if (subData.status === 'trialing' && subData.planId) {
+        // Also consider 'trialing' as an active subscription for tier benefits
+        userTier = validateTier(subData.planId) as SubscriptionTier;
+    }
+    // If status is 'none', 'canceled', 'past_due', etc., userTier remains 'starter'
+
+    if (userTier === "starter") {
+      return {
+        isSuccess: false,
+        message: "Batch processing is not available for the Starter tier.",
+        error: "TIER_LIMIT_STARTER_BATCH_DENIED",
+      };
+    }
+
+    const planDetails = subscriptionPlans[userTier];
+    if (!planDetails) {
+        return { isSuccess: false, message: "Invalid subscription plan details.", error: "INVALID_PLAN_DETAILS" };
+    }
+    const batchFileLimit = planDetails.batchProcessingLimit;
 
     if (files.length === 0) {
       return {
@@ -62,157 +177,148 @@ export async function createBatchUploadAction(
       };
     }
 
-    // 4. Fetch User Profile & Validate Tier
-    const profileResult = await getProfileByUserIdAction(userId);
-    if (!profileResult.isSuccess || !profileResult.data) {
-      // Handle profile fetch failure or missing data
+    if (files.length > batchFileLimit) {
       return {
         isSuccess: false,
-        message: profileResult.message || "Failed to fetch user profile.",
-        error: profileResult.error || "PROFILE_FETCH_FAILED",
-      };
-    }
-    const userProfile = profileResult.data; // Access the actual profile data
-
-    if (userProfile.membership === "starter") {
-      return {
-        isSuccess: false,
-        message: "Batch processing is not available for your current Starter tier.",
-        error: "TIER_LIMIT_STARTER",
+        message: `You exceeded the file limit for your tier (${batchFileLimit} files for ${userTier} tier).`,
+        error: "TIER_LIMIT_FILE_COUNT_EXCEEDED",
       };
     }
 
-    // 5. Validate File Count Against Tier Limit
-    const maxFiles = userProfile.membership === "plus"
-      ? BATCH_PROCESSING_LIMIT_PLUS
-      : BATCH_PROCESSING_LIMIT_GROWTH;
-
-    if (files.length > maxFiles) {
+    // 4. Prompt Validation
+    if (promptStrategy === 'global' && (!globalPrompt || globalPrompt.trim() === "")) {
       return {
         isSuccess: false,
-        message: `You exceeded the file limit for your tier (${maxFiles} files).`,
-        error: "TIER_LIMIT_FILE_COUNT",
+        message: "Global prompt is required and cannot be empty for the 'global' strategy.",
+        error: "VALIDATION_ERROR_GLOBAL_PROMPT_EMPTY",
+      };
+    }
+    if (promptStrategy === 'per_document' && Object.keys(perDocPromptsMap).length === 0 && files.length > 0) {
+        // This check might be too strict if some files are okay without prompts,
+        // a more granular check is inside the loop.
+        // For now, ensure the map isn't empty if strategy is per_document and files exist.
+    }
+
+
+    // 5. Server-Side File Validation
+    const invalidFiles: { name: string, reason: string }[] = [];
+    for (const file of files) {
+      if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+        invalidFiles.push({ name: file.name, reason: `Invalid file type: ${file.type}. Allowed: PDF, JPG, PNG.` });
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        invalidFiles.push({ name: file.name, reason: `File size exceeds ${MAX_FILE_SIZE_BYTES / (1024*1024)}MB limit.` });
+      }
+    }
+    if (invalidFiles.length > 0) {
+      return {
+        isSuccess: false,
+        message: "Some files are invalid: " + invalidFiles.map(f => `${f.name} (${f.reason})`).join("; "),
+        error: "VALIDATION_ERROR_INVALID_FILES",
       };
     }
 
-    // --- Step 8.2.2: Implement Quota & Rate Limiting checks ---
-
-    // Rate Limit Check
-    // Rate Limit Check
-    // Assuming checkRateLimit returns { success: boolean, message?: string }
-    const rateLimitResult = await checkRateLimit(userId, userProfile.membership, 'batch_upload');
+    // 6. Rate Limiting
+    const rateLimitResult = await checkRateLimit(userId, userTier, 'batch_upload');
     if (!rateLimitResult.success) {
       return {
         isSuccess: false,
-        // Provide a default message if rateLimitResult.message is not available
         message: (rateLimitResult as any).message || "Rate limit exceeded for batch uploads.",
         error: "RATE_LIMIT_EXCEEDED",
       };
     }
 
-    // Quota Check (using file count as initial estimate)
+    // 7. Preliminary Quota Check
     const quotaCheckResult = await checkUserQuotaAction(userId, files.length);
     if (!quotaCheckResult.isSuccess) {
+        // Using the `in` operator as a type guard, which is a standard TypeScript feature.
+        // This explicitly checks for the presence of the `error` property and its type.
+        let determinedErrorMessage = "QUOTA_CHECK_FAILED_PRELIMINARY"; // Default error code
+
+        if (('error' in quotaCheckResult) &&        // Type guard: ensures 'error' property exists
+            quotaCheckResult.error &&                 // Checks if the error message is truthy (not null, undefined, or empty string)
+            typeof quotaCheckResult.error === 'string') { // Ensures it's a string
+            determinedErrorMessage = quotaCheckResult.error;
+        }
+
         return {
             isSuccess: false,
             message: quotaCheckResult.message || "Quota check failed.",
-            // Rely only on message if isSuccess is false, as 'error' might not exist
-            error: "QUOTA_CHECK_FAILED",
+            error: determinedErrorMessage,
         };
     }
-    // Use 'hasQuota' based on the TS error feedback
-    if (!quotaCheckResult.data?.hasQuota) {
+    // If isSuccess is true, quotaCheckResult.data will be used.
+    // The check should be specifically on quotaCheckResult.data.hasQuota after confirming isSuccess is true.
+    if (!quotaCheckResult.data.hasQuota) {
         return {
             isSuccess: false,
-            // Use the message from the successful result if available
-            message: quotaCheckResult.message || "Insufficient page quota for this batch size.",
-            error: "INSUFFICIENT_QUOTA",
+            message: quotaCheckResult.message || "Insufficient page quota for this batch (preliminary check).",
+            error: "INSUFFICIENT_QUOTA_PRELIMINARY",
         };
     }
 
-    // --- Step 8.2.3: Implement File Processing & DB Transaction ---
+    // 8. Database Transaction
     let batchId: string | null = null;
-    let filesProcessedSuccessfully = 0;
-    let filesFailedProcessing = 0;
+    let successfulUploads = 0;
+    let filesFailedInitialProcessing = 0; // Renamed for clarity
+    let totalBatchPages = 0;
 
     try {
       batchId = await db.transaction(async (tx) => {
-        // Create initial batch record
         const [newBatch] = await tx
           .insert(extractionBatchesTable)
           .values({
             userId: userId,
             name: batchName,
-            extractionPrompt: extractionPrompt,
-            status: 'pending_upload', // Initial status
-            documentCount: files.length, // Total files intended
+            promptStrategy: promptStrategy,
+            extractionPrompt: promptStrategy === 'global' ? globalPrompt : null,
+            status: 'pending_upload',
+            documentCount: files.length,
             completedCount: 0,
             failedCount: 0,
-            totalPages: 0, // Will be updated later
+            totalPages: 0,
           })
           .returning({ id: extractionBatchesTable.id });
 
         if (!newBatch?.id) {
-          throw new Error("Failed to create batch record.");
+          throw new Error("Failed to create batch record in transaction.");
         }
         const currentBatchId = newBatch.id;
 
-        let totalBatchPages = 0;
-        const documentInsertPromises = [];
+        const documentInsertData: typeof documentsTable.$inferInsert[] = [];
 
         for (const file of files) {
-          const uniqueFilename = `${uuidv4()}-${file.name}`;
-          const storagePath = `batches/${userId}/${currentBatchId}/${uniqueFilename}`;
+          const processResult = await _processAndPrepareDocument(
+            file,
+            userId,
+            currentBatchId,
+            promptStrategy,
+            perDocPromptsMap,
+            getPageCount // Pass the existing getPageCount function
+          );
 
-          try {
-            // Upload file
-            const uploadResult = await uploadToStorage(
-              process.env.NEXT_PUBLIC_SUPABASE_DOCUMENTS_BUCKET!, // Ensure bucket name is in env
-              storagePath,
-              file
-            );
-
-            // Adjust check based on expected return type { success: boolean, data?: { path: string }, error?: string }
-            if (!uploadResult.success || !uploadResult.data?.path) {
-              console.error(`Failed to upload file ${file.name}:`, uploadResult.error || "Missing path in upload result data.");
-              filesFailedProcessing++;
-              continue; // Skip to next file
-            }
-
-            // Determine Page Count
-            const pageCount = await getPageCount(file);
-            totalBatchPages += pageCount;
-
-            // Prepare document record insert (execute later)
-            documentInsertPromises.push(
-              tx.insert(documentsTable).values({
-                userId: userId,
-                batchId: currentBatchId,
-                originalFilename: file.name,
-                storagePath: uploadResult.data.path, // Use path from upload result data
-                mimeType: file.type,
-                fileSize: file.size,
-                pageCount: pageCount,
-                status: 'uploaded', // Correct initial document status
-              })
-            );
-            filesProcessedSuccessfully++;
-
-          } catch (fileProcessingError) {
-             console.error(`Error processing file ${file.name}:`, fileProcessingError);
-             filesFailedProcessing++;
-             // Skip this file
-             continue;
+          if (processResult.success && processResult.dbData && processResult.pageCount !== undefined) {
+            documentInsertData.push(processResult.dbData);
+            totalBatchPages += processResult.pageCount;
+            successfulUploads++;
+          } else {
+            filesFailedInitialProcessing++;
+            console.error(`Skipping file ${file.name} due to error: ${processResult.error}`);
+            // If page count was determined before failure, and it's a failure that means the page won't be processed,
+            // it should not contribute to totalBatchPages.
+            // The current _processAndPrepareDocument adds pageCount to totalBatchPages only on success.
+            // If pageCount was returned in processResult even on failure (e.g. upload failed after page count),
+            // and if that pageCount was already added to a running total *before* this check,
+            // it might need to be subtracted. However, our current flow only adds to totalBatchPages on full success.
           }
         }
 
-        // Insert all document records that were processed successfully
-        if (documentInsertPromises.length > 0) {
-           await Promise.all(documentInsertPromises);
+        if (successfulUploads > 0) {
+           await tx.insert(documentsTable).values(documentInsertData);
         }
 
-        if (filesProcessedSuccessfully === 0 && files.length > 0) {
-           // All files failed, mark batch as failed immediately
+        if (successfulUploads === 0 && files.length > 0) {
            await tx
              .update(extractionBatchesTable)
              .set({
@@ -221,109 +327,96 @@ export async function createBatchUploadAction(
                updatedAt: new Date(),
              })
              .where(eq(extractionBatchesTable.id, currentBatchId));
-           // Throw an error to rollback any potential partial inserts (though none should happen here)
-           // and signal failure to the outer catch block.
-           throw new Error(`Batch ${currentBatchId}: All files failed during upload or page counting.`);
+           throw new Error(`Batch ${currentBatchId}: All ${files.length} files failed during initial upload/processing stage.`);
         } else {
-           // Update batch record with final status and page count
            await tx
              .update(extractionBatchesTable)
              .set({
-               status: 'queued', // Final status after upload
+               status: 'queued',
                totalPages: totalBatchPages,
-               failedCount: filesFailedProcessing, // Record files that failed upload/page count
+               documentCount: successfulUploads,
+               failedCount: filesFailedInitialProcessing,
                updatedAt: new Date(),
              })
              .where(eq(extractionBatchesTable.id, currentBatchId));
         }
-
-        return currentBatchId; // Return batchId on successful transaction
+        return currentBatchId;
       });
 
       if (!batchId) {
-         // This case should ideally be handled by the error thrown if all files fail
-         throw new Error("Batch creation transaction completed but failed to return a valid ID.");
+         throw new Error("Batch creation transaction did not return a valid ID.");
       }
 
-      // --- Step 8.2.4: Finalize Action (Analytics, Revalidation, Return) ---
-      // TODO (8.2.4): Implement Analytics Tracking
-      // TODO (8.2.4): Implement Revalidation
+      await trackServerEvent('batch_created', userId, {
+        batchId: batchId,
+        batchName: batchName || 'Untitled Batch',
+        fileCount: successfulUploads,
+        totalPages: totalBatchPages,
+        promptStrategy: promptStrategy,
+      });
 
-      console.log(`Batch ${batchId} created successfully.`);
+      revalidatePath('/dashboard/batches');
+      revalidatePath('/dashboard/history');
+
       return {
         isSuccess: true,
-        message: `Batch '${batchName || batchId}' created successfully with ${filesProcessedSuccessfully} documents queued.`,
+        message: `Batch '${batchName || batchId}' created. ${successfulUploads} documents queued. ${filesFailedInitialProcessing > 0 ? `${filesFailedInitialProcessing} files failed initial processing.` : ''}`,
         data: { batchId: batchId },
       };
 
     } catch (transactionError: any) {
-       console.error("Batch creation transaction failed:", transactionError);
-       // If batchId was created before error, mark its status as 'failed'
-       // This handles errors during the transaction itself (e.g., DB constraint violation)
-       // or the specific error thrown if all files failed processing.
+       console.error("Batch creation transaction or post-transaction step failed:", transactionError.message);
        if (batchId) {
            try {
                await db.update(extractionBatchesTable)
                    .set({ status: 'failed', updatedAt: new Date() })
                    .where(eq(extractionBatchesTable.id, batchId));
-               console.log(`Marked batch ${batchId} as failed due to transaction error.`);
-           } catch (updateError) {
-               console.error(`Failed to mark batch ${batchId} as failed after transaction error:`, updateError);
+               console.log(`Marked batch ${batchId} as failed due to error: ${transactionError.message}`);
+           } catch (updateError: any) {
+               console.error(`Failed to mark batch ${batchId} as failed after error: ${updateError.message}`);
            }
        }
        return {
            isSuccess: false,
-           message: transactionError.message || "Failed to create batch due to a transaction error.",
-           error: "TRANSACTION_ERROR",
+           message: transactionError.message || "Failed to create batch due to a server error.",
+           error: "TRANSACTION_OR_POST_TRANSACTION_ERROR",
        };
     }
 
-  } catch (error) { // Outer catch for initial validation errors etc.
-    console.error("Error creating batch upload:", error);
-
+  } catch (error: any) { // Outer catch for setup errors, initial validation, etc.
+    console.error("Error creating batch upload:", error.message);
     if (error instanceof ZodError) {
       return {
         isSuccess: false,
-        message: "Validation failed.",
-        error: error.errors.map((e) => e.message).join(", "),
+        message: "Validation failed: " + error.errors.map((e) => e.message).join(", "),
+        error: "ZOD_VALIDATION_ERROR",
       };
     }
-
     return {
       isSuccess: false,
-      message: "An unexpected error occurred while creating the batch.",
-      error: "BATCH_CREATION_FAILED",
+      message: error.message || "An unexpected error occurred while preparing the batch.",
+      error: "BATCH_PREPARATION_FAILED",
     };
   }
 }
 
-// Helper function to get page count
-async function getPageCount(file: File): Promise<number> {
+// Helper function to get page count, now accepts optional buffer
+async function getPageCount(file: File, fileArrayBuffer?: ArrayBuffer): Promise<number> {
   if (file.type === 'application/pdf') {
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      // Attempt to load with encryption ignored first
-      const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+      const arrayBufferToLoad = fileArrayBuffer || await file.arrayBuffer();
+      const pdfDoc = await PDFDocument.load(arrayBufferToLoad, { ignoreEncryption: true });
       return pdfDoc.getPageCount();
     } catch (error: any) {
-      // Log the specific error for debugging
       console.error(`Error counting pages for PDF ${file.name}:`, error.message);
-      // Rethrow a more specific error or handle based on error type if needed
-      // e.g., check if it's an encryption error that requires a password (not handled here)
-      throw new Error(`Failed to process PDF pages for ${file.name}. It might be corrupted or encrypted.`);
+      throw new Error(`Failed to process PDF pages for ${file.name}. It might be corrupted or encrypted. Error: ${error.message}`);
     }
-  } else if (file.type.startsWith('image/')) {
-    return 1; // Assume 1 page for images
-  } else {
-    console.warn(`Unsupported file type for page counting: ${file.type} (${file.name})`);
-    // Decide on default behavior for unsupported types
-    // Option 1: Throw an error
-    // throw new Error(`Unsupported file type for page counting: ${file.type}`);
-    // Option 2: Return a default (e.g., 1 or 0) - returning 1 for now
+  } else if (ALLOWED_MIME_TYPES.includes(file.type) && file.type.startsWith('image/')) {
     return 1;
+  } else {
+    console.warn(`Unsupported file type for page counting: ${file.type} (${file.name}). Defaulting to 1 page.`);
+    return 1; // Default to 1 for other allowed (image) types or if somehow an unallowed type slips through
   }
 }
-
-
 // TODO (8.4.1): Implement fetchUserBatchesAction
 // TODO (8.4.2): Implement fetchBatchDetailsAction
