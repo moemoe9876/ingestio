@@ -29,32 +29,45 @@ export async function GET(request: NextRequest) {
   console.log("Batch processor cron job started.");
 
   try {
-    // 2. Fetch Queued Batches
-    const queuedBatches = await db
+    // 2. Fetch Batches to Consider
+    const batchesToConsider = await db
       .select()
       .from(extractionBatchesTable)
-      .where(eq(extractionBatchesTable.status, 'queued'))
-      .orderBy(extractionBatchesTable.createdAt) // Process oldest first
+      .where(
+        sql`${extractionBatchesTable.status} = 'queued' OR 
+             (${extractionBatchesTable.status} = 'processing' AND 
+              EXISTS (SELECT 1 FROM ${documentsTable} 
+                      WHERE ${documentsTable.batchId} = ${extractionBatchesTable.id} 
+                      AND ${documentsTable.status} = 'uploaded'))`
+      )
+      .orderBy(extractionBatchesTable.createdAt) // Prioritize older batches
       .limit(MAX_BATCHES_PER_RUN);
 
-    if (queuedBatches.length === 0) {
-      console.log("No queued batches to process.");
-      return NextResponse.json({ success: true, message: "No queued batches to process." });
+    if (batchesToConsider.length === 0) {
+      console.log("No batches to process at this time (queued or partially processed).");
+      return NextResponse.json({ success: true, message: "No batches to process at this time." });
     }
 
-    console.log(`Processing ${queuedBatches.length} batches.`);
+    console.log(`Found ${batchesToConsider.length} batches to consider for processing.`);
 
     // 3. Loop Through Batches
-    for (const batch of queuedBatches) {
-      console.log(`Attempting to lock batch ${batch.id}`);
+    for (const batch of batchesToConsider) {
+      console.log(`Attempting to lock batch ${batch.id} (current status: ${batch.status})`);
       // Atomic Batch Locking
       const updatedBatchResult = await db.update(extractionBatchesTable)
-        .set({ status: 'processing', updatedAt: new Date() })
-        .where(and(eq(extractionBatchesTable.id, batch.id), eq(extractionBatchesTable.status, 'queued')))
+        .set({ 
+            status: 'processing', // Ensure it's (or stays) 'processing'
+            updatedAt: new Date()  // Refresh updatedAt timestamp
+        })
+        .where(and(
+          eq(extractionBatchesTable.id, batch.id),
+          // Allow re-locking if it's 'queued' OR if it's 'processing' (and we know it has uploaded docs from the fetch query)
+          sql`${extractionBatchesTable.status} IN ('queued', 'processing')` 
+        ))
         .returning({ id: extractionBatchesTable.id });
 
       if (updatedBatchResult.length === 0) {
-        console.log(`Batch ${batch.id} was locked by another process or its status changed. Skipping.`);
+        console.log(`Batch ${batch.id} was locked by another process, its status changed, or no longer meets processing criteria. Skipping.`);
         continue; // Batch was likely picked up by another concurrent cron run or status changed
       }
       console.log(`Successfully locked batch ${batch.id}. Status set to 'processing'.`);
@@ -162,11 +175,11 @@ export async function GET(request: NextRequest) {
               batchId: batch.id, // Pass batchId so extraction job can be linked
               // Provide default values for other schema fields as the action expects them
               includeConfidence:false, 
-              includePositions: false, 
+              includeBoundingBoxes: false, 
               useSegmentation: false, 
               segmentationThreshold: 10, 
               maxPagesPerSegment: 10, 
-              skipClassification: false, // Batch processor usually relies on its own classification or resolved prompt
+              skipClassification: true, // Batch processor usually relies on its own classification or resolved prompt
             },
             true // invokedByBatchProcessor = true
           );

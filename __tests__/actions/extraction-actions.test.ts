@@ -232,7 +232,6 @@ describe("extractDocumentDataAction", () => {
     const extractionData = {
       documentId: testUuid,
       includeConfidence: true,
-      includePositions: true,
       extractionPrompt: "Extract data from this document"
     };
 
@@ -276,7 +275,6 @@ describe("extractDocumentDataAction", () => {
     const extractionData = {
       documentId: testUuid,
       includeConfidence: true,
-      includePositions: true,
       extractionPrompt: "Extract data from this document"
     };
     

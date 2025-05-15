@@ -6,7 +6,7 @@ import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client"
 import { getPostHogServerClient, trackServerEvent } from "@/lib/analytics/server";
 import { getCurrentUser } from "@/lib/auth-utils";
 import { mergeSegmentResults, segmentDocument, shouldSegmentDocument } from "@/lib/preprocessing/document-segmentation";
-import { checkRateLimit, createRateLimiter, isBatchSizeAllowed, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
+import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
 import {
   CLASSIFICATION_SYSTEM_INSTRUCTIONS,
@@ -28,101 +28,6 @@ import { z } from "zod";
 // Initialize PostHog client instance
 const phClient = getPostHogServerClient();
 
-// Define input validation schema for text extraction
-const extractTextSchema = z.object({
-  documentBase64: z.string(),
-  mimeType: z.string(),
-  extractionPrompt: z.string().min(5).max(1000),
-  batchSize: z.number().int().min(1).optional().default(1),
-});
-
-// Define input validation schema for structured extraction
-const extractStructuredDataSchema = z.object({
-  documentBase64: z.string(),
-  mimeType: z.string(),
-  extractionPrompt: z.string().min(5).max(1000),
-  batchSize: z.number().int().min(1).optional().default(1),
-});
-
-// Sample invoice schema for structured data extraction
-const invoiceSchema = z.object({
-  invoiceNumber: z.string().optional(),
-  date: z.string().optional(),
-  dueDate: z.string().optional(),
-  totalAmount: z.number().optional(),
-  vendor: z.object({
-    name: z.string().optional(),
-    address: z.string().optional(),
-    phone: z.string().optional(),
-    email: z.string().optional(),
-  }).optional(),
-  customer: z.object({
-    name: z.string().optional(),
-    address: z.string().optional(),
-    phone: z.string().optional(),
-    email: z.string().optional(),
-  }).optional(),
-  lineItems: z.array(
-    z.object({
-      description: z.string().optional(),
-      quantity: z.number().optional(),
-      unitPrice: z.number().optional(),
-      totalPrice: z.number().optional(),
-    })
-  ).optional(),
-  confidence: z.number().optional(),
-});
-
-type InvoiceData = z.infer<typeof invoiceSchema>;
-
-// Resume schema for structured data extraction
-const resumeSchema = z.object({
-  personalInfo: z.object({
-    name: z.string().optional(),
-    email: z.string().email().optional(),
-    phone: z.string().optional(),
-    location: z.string().optional(),
-    linkedin: z.string().url().optional(),
-    website: z.string().url().optional(),
-  }).optional(),
-  education: z.array(
-    z.object({
-      institution: z.string().optional(),
-      degree: z.string().optional(),
-      fieldOfStudy: z.string().optional(),
-      startDate: z.string().optional(),
-      endDate: z.string().optional(),
-      gpa: z.string().optional(),
-    })
-  ).optional(),
-  workExperience: z.array(
-    z.object({
-      company: z.string().optional(),
-      position: z.string().optional(),
-      startDate: z.string().optional(),
-      endDate: z.string().optional(),
-      location: z.string().optional(),
-      description: z.string().optional(),
-    })
-  ).optional(),
-  skills: z.array(z.string()).optional(),
-  certifications: z.array(
-    z.object({
-      name: z.string().optional(),
-      issuer: z.string().optional(),
-      date: z.string().optional(),
-    })
-  ).optional(),
-  languages: z.array(
-    z.object({
-      language: z.string().optional(),
-      proficiency: z.string().optional(),
-    })
-  ).optional(),
-  confidence: z.number().optional(),
-});
-
-type ResumeData = z.infer<typeof resumeSchema>;
 
 // Define input validation schema for document extraction
 const extractDocumentSchema = z.object({
@@ -130,10 +35,10 @@ const extractDocumentSchema = z.object({
   batchId: z.string().uuid().optional(), // Added for batch processing context
   extractionPrompt: z.string().min(0).max(1000).optional(),
   includeConfidence: z.boolean().optional().default(true),
-  includePositions: z.boolean().optional().default(true),
   useSegmentation: z.boolean().optional().default(true), // New option to enable/disable segmentation
   segmentationThreshold: z.number().optional().default(10), // Page threshold to trigger segmentation
   maxPagesPerSegment: z.number().optional().default(10), // Maximum pages per segment
+  includeBoundingBoxes: z.boolean().optional().default(true), // Added for bounding boxes
   skipClassification: z.boolean().optional().default(false), // Option to skip the classification step
 });
 
@@ -142,78 +47,78 @@ const extractDocumentSchema = z.object({
  * @param userId User ID
  * @param batchSize Number of pages to process
  */
-async function applyRateLimiting(userId: string, batchSize: number = 1): Promise<{
-  isAllowed: boolean;
-  message?: string;
-  retryAfter?: number;
-  tier: SubscriptionTier;
-}> {
-  try {
-    // Get user's subscription data from KV store (source of truth)
-    const subscriptionResult = await getUserSubscriptionDataKVAction();
-    if (!subscriptionResult.isSuccess) {
-      return {
-        isAllowed: false,
-        message: "Unable to determine user subscription tier",
-        tier: "starter"
-      };
-    }
+// async function applyRateLimiting(userId: string, batchSize: number = 1): Promise<{
+//   isAllowed: boolean;
+//   message?: string;
+//   retryAfter?: number;
+//   tier: SubscriptionTier;
+// }> {
+//   try {
+//     // Get user's subscription data from KV store (source of truth)
+//     const subscriptionResult = await getUserSubscriptionDataKVAction();
+//     if (!subscriptionResult.isSuccess) {
+//       return {
+//         isAllowed: false,
+//         message: "Unable to determine user subscription tier",
+//         tier: "starter"
+//       };
+//     }
     
-    // Determine tier based on subscription status and planId
-    let tier: SubscriptionTier = "starter";
-    if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
-      tier = subscriptionResult.data.planId as SubscriptionTier;
-    }
+//     // Determine tier based on subscription status and planId
+//     let tier: SubscriptionTier = "starter";
+//     if (subscriptionResult.data.status === 'active' && subscriptionResult.data.planId) {
+//       tier = subscriptionResult.data.planId as SubscriptionTier;
+//     }
     
-    // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
-    tier = validateTier(tier);
+//     // Validate the tier to ensure it exists in RATE_LIMIT_TIERS
+//     tier = validateTier(tier);
     
-    // Check if batch size is allowed for the tier
-    if (!isBatchSizeAllowed(tier, batchSize)) {
-      return {
-        isAllowed: false,
-        message: `Batch size exceeds ${tier} tier limit`,
-        tier
-      };
-    }
+//     // Check if batch size is allowed for the tier
+//     if (!isBatchSizeAllowed(tier, batchSize)) {
+//       return {
+//         isAllowed: false,
+//         message: `Batch size exceeds ${tier} tier limit`,
+//         tier
+//       };
+//     }
     
-    // Check if user has enough quota remaining
-    const quotaResult = await checkUserQuotaAction(userId, batchSize);
-    if (!quotaResult.isSuccess || !quotaResult.data.hasQuota) {
-      return {
-        isAllowed: false,
-        message: `Page quota exceeded. You have ${quotaResult.data?.remaining || 0} pages remaining for this billing period`,
-        tier
-      };
-    }
+//     // Check if user has enough quota remaining
+//     const quotaResult = await checkUserQuotaAction(userId, batchSize);
+//     if (!quotaResult.isSuccess || !quotaResult.data.hasQuota) {
+//       return {
+//         isAllowed: false,
+//         message: `Page quota exceeded. You have ${quotaResult.data?.remaining || 0} pages remaining for this billing period`,
+//         tier
+//       };
+//     }
     
-    // Apply rate limiting for API requests
-    const rateLimiter = createRateLimiter(userId, tier, "extraction");
-    const { success, reset } = await rateLimiter.limit(userId);
+//     // Apply rate limiting for API requests
+//     const rateLimiter = createRateLimiter(userId, tier, "extraction");
+//     const { success, reset } = await rateLimiter.limit(userId);
     
-    if (!success) {
-      const retryAfter = Math.ceil((reset - Date.now()) / 1000);
-      return {
-        isAllowed: false,
-        message: `Rate limit exceeded. Too many requests at once. Please try again in ${retryAfter} seconds`,
-        retryAfter,
-        tier
-      };
-    }
+//     if (!success) {
+//       const retryAfter = Math.ceil((reset - Date.now()) / 1000);
+//       return {
+//         isAllowed: false,
+//         message: `Rate limit exceeded. Too many requests at once. Please try again in ${retryAfter} seconds`,
+//         retryAfter,
+//         tier
+//       };
+//     }
     
-    return {
-      isAllowed: true,
-      tier
-    };
-  } catch (error) {
-    console.error("Error applying rate limiting:", error);
-    return {
-      isAllowed: false,
-      message: "Error checking rate limits",
-      tier: "starter"
-    };
-  }
-}
+//     return {
+//       isAllowed: true,
+//       tier
+//     };
+//   } catch (error) {
+//     console.error("Error applying rate limiting:", error);
+//     return {
+//       isAllowed: false,
+//       message: "Error checking rate limits",
+//       tier: "starter"
+//     };
+//   }
+// }
 
 /**
  * Classifies a document based on its content using structured output
@@ -322,7 +227,7 @@ export async function extractDocumentDataAction(
       batchId, // Destructure batchId
       extractionPrompt,
       includeConfidence,
-      includePositions,
+      includeBoundingBoxes,
       useSegmentation,
       segmentationThreshold,
       maxPagesPerSegment,
@@ -414,7 +319,7 @@ export async function extractDocumentDataAction(
         extraction_prompt: extractionPrompt,
         extraction_options: {
           includeConfidence,
-          includePositions,
+          includeBoundingBoxes,
           useSegmentation,
           segmentationThreshold,
           maxPagesPerSegment,
@@ -461,7 +366,7 @@ export async function extractDocumentDataAction(
           .update({
             extraction_options: {
               includeConfidence,
-              includePositions,
+              includeBoundingBoxes,
               useSegmentation,
               segmentationThreshold,
               maxPagesPerSegment,
@@ -493,7 +398,7 @@ export async function extractDocumentDataAction(
     }
     
     // Apply standard prompt enhancements (JSON formatting, confidence, positions)
-    const enhancedPrompt = enhancePrompt(finalPrompt, includeConfidence, includePositions);
+    const enhancedPrompt = enhancePrompt(finalPrompt, includeConfidence, includeBoundingBoxes);
     
     // Prepare system instructions
     const contextualSystemInstructions = `${SYSTEM_INSTRUCTIONS}\nAnalyze the following document and extract the requested information.`;
@@ -821,8 +726,8 @@ export async function extractTextAction(
       documentId,
       extractionPrompt: extractionPrompt || "Extract all text content from this document.",
       includeConfidence: false,
-      includePositions: false,
-      useSegmentation: true,
+      includeBoundingBoxes: true,
+      useSegmentation: false,
       segmentationThreshold: 10,
       maxPagesPerSegment: 10,
       skipClassification: true // Skip classification for simple text extraction
@@ -849,8 +754,8 @@ export async function extractInvoiceDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all invoice information including invoice number, date, total amount, vendor details, and line items.",
     includeConfidence: true,
-    includePositions: false,
-    useSegmentation: true,
+    includeBoundingBoxes: true,
+    useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
     skipClassification: false // We want to use classification for invoice extraction
@@ -870,8 +775,8 @@ export async function extractResumeDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all resume information including personal details, work experience, education, and skills.",
     includeConfidence: true,
-    includePositions: false,
-    useSegmentation: true,
+    includeBoundingBoxes: true,
+    useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
     skipClassification: false
@@ -891,8 +796,8 @@ export async function extractReceiptDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all receipt information including merchant name, date, items purchased, and total amount.",
     includeConfidence: true,
-    includePositions: false,
-    useSegmentation: true,
+    includeBoundingBoxes: true,
+    useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
     skipClassification: false
@@ -912,8 +817,8 @@ export async function extractFormDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all form fields and their values, including any checkbox or radio button selections.",
     includeConfidence: true,
-    includePositions: true,
-    useSegmentation: true,
+    includeBoundingBoxes: true,
+    useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
     skipClassification: false

@@ -16,21 +16,20 @@ import { useEffect, useState } from "react";
 
 interface ExtractionOptions {
   includeConfidence: boolean;
-  includePositions: boolean;
+  includeBoundingBoxes: boolean;
   detectDocumentType: boolean;
   temperature: number;
 }
 
 interface PromptInputProps {
   onSubmit: (prompt: string, options: ExtractionOptions) => void;
-  file: File | null;
 }
 
-export function PromptInput({ onSubmit, file }: PromptInputProps) {
+export function PromptInput({ onSubmit }: PromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState<ExtractionOptions>({
     includeConfidence: false,
-    includePositions: false,
+    includeBoundingBoxes: true,
     detectDocumentType: true,
     temperature: 0.1
   });
@@ -94,9 +93,9 @@ export function PromptInput({ onSubmit, file }: PromptInputProps) {
                     </p>
                   </div>
                   <Switch 
-                    id="positions" 
-                    checked={options.includePositions}
-                    onCheckedChange={(checked) => updateOption("includePositions", checked)}
+                    id="boundingBoxes" 
+                    checked={options.includeBoundingBoxes}
+                    onCheckedChange={(checked) => updateOption("includeBoundingBoxes", checked)}
                   />
                 </div>
                 

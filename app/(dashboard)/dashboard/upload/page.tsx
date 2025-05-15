@@ -130,10 +130,10 @@ export default function UploadPage() {
               documentId: uploadResult.data.id,
               extractionPrompt: extractionPrompt,
               includeConfidence: false,
-              includePositions: false,
+              includeBoundingBoxes: true,
               useSegmentation: false,
               segmentationThreshold: 0.5,
-              maxPagesPerSegment: 5,
+              maxPagesPerSegment: 10,
               skipClassification: false,
             });
             
