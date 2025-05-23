@@ -13,7 +13,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 // Import functions AFTER mocks are set up
-import { getCurrentUser, isUserAuthenticated } from '@/lib/auth-utils';
+import { getCurrentUser, isUserAuthenticated } from '@/lib/auth/utils';
 
 describe('Authentication Utilities', () => {
   beforeEach(() => {

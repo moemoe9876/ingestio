@@ -1,5 +1,5 @@
 import { syncSubscriptionAfterSuccessAction } from "@/actions/stripe/sync-actions";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { redis } from "@/lib/redis/client";
 import { syncStripeDataToKV } from "@/lib/stripe/sync";
 import { StripeCustomerDataKV, userToCustomerKey } from "@/types/stripe-kv-types";
@@ -12,7 +12,7 @@ vi.mock("@/lib/redis/client", () => ({
     set: vi.fn(),
   },
 }));
-vi.mock("@/lib/auth-utils", () => ({
+vi.mock("@/lib/auth/utils", () => ({
   getCurrentUser: vi.fn(),
 }));
 vi.mock("@/lib/stripe/sync", () => ({

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 
 // Mock auth utils
-vi.mock('@/lib/auth-utils', () => ({
+vi.mock('@/lib/auth/utils', () => ({
   getCurrentUser: vi.fn()
 }));
 
@@ -64,7 +64,7 @@ import { getProfileByUserIdAction } from '@/actions/db/profiles-actions';
 import { checkUserQuotaAction, incrementPagesProcessedAction } from '@/actions/db/user-usage-actions';
 import { db } from '@/db/db';
 import { trackServerEvent } from '@/lib/analytics/server';
-import { getCurrentUser } from '@/lib/auth-utils';
+import { getCurrentUser } from '@/lib/auth/utils';
 import { checkRateLimit } from '@/lib/rate-limiting/limiter';
 import { createServerClient } from '@/lib/supabase/server';
 

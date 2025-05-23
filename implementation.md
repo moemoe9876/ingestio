@@ -1267,7 +1267,7 @@ Okay, let's refine the remaining implementation steps, focusing on optimizing th
             import { getVertexModel, getVertexStructuredModel, VERTEX_MODELS } from '@/lib/ai/vertex-client';
             import { generateObject, generateText } from 'ai';
             import { randomUUID } from 'crypto'; // For generating trace IDs
-            import { getCurrentUser } from '@/lib/auth-utils';
+            import { getCurrentUser } from '@/lib/auth/utils';
             // ... other imports ...
 
             const phClient = getPostHogServerClient();

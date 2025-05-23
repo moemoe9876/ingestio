@@ -1,7 +1,7 @@
 import { generateSchemaAction } from "@/actions/ai/schema";
 import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
 import { trackServerEvent } from "@/lib/analytics/server";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { checkRateLimit } from "@/lib/rate-limiting/limiter";
 import { generateObject } from "ai";
 import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, test, vi, type Mock } from "vitest";
 vi.mock("server-only", () => ({}));
 
 // Mock dependencies
-vi.mock("@/lib/auth-utils", () => ({
+vi.mock("@/lib/auth/utils", () => ({
   getCurrentUser: vi.fn(),
 }));
 

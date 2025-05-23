@@ -1,4 +1,4 @@
-import { getCurrentUser } from '@/lib/auth-utils';
+import { getCurrentUser } from '@/lib/auth/utils';
 import { createAdminClient } from './server';
 
 /**

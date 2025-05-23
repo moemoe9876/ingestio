@@ -6,7 +6,7 @@ import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { db } from "@/db/db";
 import { documentsTable, InsertDocument, SelectDocument } from "@/db/schema";
 import { trackServerEvent } from "@/lib/analytics/server";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createAdminClient } from "@/lib/supabase/server";
 import { uploadToStorage } from "@/lib/supabase/storage-utils";
@@ -313,7 +313,8 @@ export async function fetchDocumentForReviewAction(
       createdAt: new Date(documentData.created_at),
       updatedAt: new Date(documentData.updated_at),
       batchId: (documentData as any).batch_id ?? null, // Cast to any to bypass type check
-      extractionPrompt: (documentData as any).extraction_prompt ?? null
+      extractionPrompt: (documentData as any).extraction_prompt ?? null,
+      errorMessage: (documentData as any).error_message ?? null
     }
 
     // 3. Generate signed URL for the document
@@ -541,6 +542,7 @@ export async function fetchUserDocumentsAction({
       updatedAt: doc.updated_at ? new Date(doc.updated_at) : new Date(doc.created_at),
       batchId: (doc as any).batch_id ?? null, // Cast to any to bypass type check
       extractionPrompt: (doc as any).extraction_prompt ?? null,
+      errorMessage: (doc as any).error_message ?? null,
     }))
 
     return {

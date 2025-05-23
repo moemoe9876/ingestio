@@ -3,7 +3,7 @@
 import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
 import { trackServerEvent } from "@/lib/analytics/server";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { checkRateLimit, SubscriptionTier } from "@/lib/rate-limiting/limiter";
 import {
   generateJsonSchemaPrompt,

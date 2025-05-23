@@ -5,10 +5,10 @@ import { updateSubscriptionProfileAction } from '@/actions/db/profiles-actions';
 import * as userActions from '@/actions/db/users-actions';
 import { db } from '@/db/db';
 import { trackServerEvent } from '@/lib/analytics/server';
-import { getCurrentUser } from '@/lib/auth-utils';
+import { getCurrentUser } from '@/lib/auth/utils';
 
 // Mock auth utility
-vi.mock('@/lib/auth-utils', () => ({
+vi.mock('@/lib/auth/utils', () => ({
   getCurrentUser: vi.fn()
 }));
 

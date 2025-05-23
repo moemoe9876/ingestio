@@ -2,7 +2,7 @@
 
 import { ZodError } from "zod";
 // @ts-ignore - Suppress persistent type error for pdf-lib
-import { eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, type SQL } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache'; // Added for revalidation
 import { PDFDocument } from 'pdf-lib';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,7 +13,7 @@ import { db } from "@/db/db";
 import { documentsTable } from "@/db/schema/documents-schema";
 import { extractionBatchesTable } from "@/db/schema/extraction-batches-schema";
 import { trackServerEvent } from "@/lib/analytics/server"; // Corrected import path
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { subscriptionPlans } from "@/lib/config/subscription-plans";
 import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter"; // Added validateTier and SubscriptionTier
 import { uploadToStorage } from "@/lib/supabase/storage-utils";
@@ -418,5 +418,213 @@ async function getPageCount(file: File, fileArrayBuffer?: ArrayBuffer): Promise<
     return 1; // Default to 1 for other allowed (image) types or if somehow an unallowed type slips through
   }
 }
-// TODO (8.4.1): Implement fetchUserBatchesAction
-// TODO (8.4.2): Implement fetchBatchDetailsAction
+// Batch fetching actions for UI
+
+type FetchBatchesOptions = {
+  page?: number;
+  limit?: number;
+  sortBy?: 'created_at' | 'updated_at' | 'name' | 'status';
+  sortOrder?: 'asc' | 'desc';
+  statusFilter?: string;
+  nameFilter?: string;
+};
+
+export async function fetchUserBatchListAction(
+  options: FetchBatchesOptions = {}
+): Promise<ActionState<{ batches: any[], totalCount: number }>> {
+  try {
+    const userId = await getCurrentUser();
+    
+    const {
+      page = 1,
+      limit = 10,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      statusFilter,
+      nameFilter
+    } = options;
+
+    const offset = (page - 1) * limit;
+    
+    // Build where conditions
+    let whereConditions: SQL | undefined = eq(extractionBatchesTable.userId, userId);
+    
+    if (statusFilter && statusFilter !== 'all') {
+      whereConditions = and(whereConditions, eq(extractionBatchesTable.status, statusFilter as any));
+    }
+    
+    if (nameFilter && nameFilter.trim()) {
+      whereConditions = and(whereConditions, ilike(extractionBatchesTable.name, `%${nameFilter.trim()}%`));
+    }
+
+    // Build order by
+    const orderColumn = sortBy === 'created_at' ? extractionBatchesTable.createdAt :
+                       sortBy === 'updated_at' ? extractionBatchesTable.updatedAt :
+                       sortBy === 'name' ? extractionBatchesTable.name :
+                       extractionBatchesTable.status;
+    const orderBy = sortOrder === 'asc' ? asc(orderColumn) : desc(orderColumn);
+
+    // Fetch batches with pagination
+    const batches = await db
+      .select()
+      .from(extractionBatchesTable)
+      .where(whereConditions)
+      .orderBy(orderBy)
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count for pagination
+    const [{ count: totalCount }] = await db
+      .select({ count: count() })
+      .from(extractionBatchesTable)
+      .where(whereConditions);
+
+    return {
+      isSuccess: true,
+      message: "Batches fetched successfully",
+      data: { batches, totalCount }
+    };
+
+  } catch (error: any) {
+    console.error("Error fetching user batches:", error.message);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch batches",
+      error: "FETCH_BATCHES_FAILED"
+    };
+  }
+}
+
+export async function fetchBatchDetailAction(
+  batchId: string
+): Promise<ActionState<{ batch: any; documents: any[] }>> {
+  try {
+    const userId = await getCurrentUser();
+    
+    // Fetch batch details
+    const [batch] = await db
+      .select()
+      .from(extractionBatchesTable)
+      .where(
+        and(
+          eq(extractionBatchesTable.id, batchId),
+          eq(extractionBatchesTable.userId, userId)
+        )
+      );
+
+    if (!batch) {
+      return {
+        isSuccess: false,
+        message: "Batch not found or access denied",
+        error: "BATCH_NOT_FOUND"
+      };
+    }
+
+    // Fetch associated documents
+    const documents = await db
+      .select()
+      .from(documentsTable)
+      .where(eq(documentsTable.batchId, batchId))
+      .orderBy(desc(documentsTable.createdAt));
+
+    return {
+      isSuccess: true,
+      message: "Batch details fetched successfully",
+      data: { batch, documents }
+    };
+
+  } catch (error: any) {
+    console.error("Error fetching batch details:", error.message);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch batch details",
+      error: "FETCH_BATCH_DETAILS_FAILED"
+    };
+  }
+}
+
+export async function fetchDocumentsForBatchAction(
+  batchId: string,
+  options: { 
+    page?: number; 
+    limit?: number; 
+    statusFilter?: string;
+    sortBy?: 'created_at' | 'original_filename' | 'status';
+    sortOrder?: 'asc' | 'desc';
+  } = {}
+): Promise<ActionState<{ documents: any[]; totalCount: number }>> {
+  try {
+    const userId = await getCurrentUser();
+    
+    // Verify batch ownership
+    const [batch] = await db
+      .select({ id: extractionBatchesTable.id })
+      .from(extractionBatchesTable)
+      .where(
+        and(
+          eq(extractionBatchesTable.id, batchId),
+          eq(extractionBatchesTable.userId, userId)
+        )
+      );
+
+    if (!batch) {
+      return {
+        isSuccess: false,
+        message: "Batch not found or access denied",
+        error: "BATCH_NOT_FOUND"
+      };
+    }
+
+    const {
+      page = 1,
+      limit = 20,
+      statusFilter,
+      sortBy = 'created_at',
+      sortOrder = 'desc'
+    } = options;
+
+    const offset = (page - 1) * limit;
+    
+    // Build where conditions
+    let whereConditions: SQL | undefined = eq(documentsTable.batchId, batchId);
+    
+    if (statusFilter && statusFilter !== 'all') {
+      whereConditions = and(whereConditions, eq(documentsTable.status, statusFilter as any));
+    }
+
+    // Build order by
+    const orderColumn = sortBy === 'created_at' ? documentsTable.createdAt :
+                       sortBy === 'original_filename' ? documentsTable.originalFilename :
+                       documentsTable.status;
+    const orderBy = sortOrder === 'asc' ? asc(orderColumn) : desc(orderColumn);
+
+    // Fetch documents with pagination
+    const documents = await db
+      .select()
+      .from(documentsTable)
+      .where(whereConditions)
+      .orderBy(orderBy)
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const [{ count: totalCount }] = await db
+      .select({ count: count() })
+      .from(documentsTable)
+      .where(whereConditions);
+
+    return {
+      isSuccess: true,
+      message: "Documents fetched successfully",
+      data: { documents, totalCount }
+    };
+
+  } catch (error: any) {
+    console.error("Error fetching documents for batch:", error.message);
+    return {
+      isSuccess: false,
+      message: "Failed to fetch documents",
+      error: "FETCH_DOCUMENTS_FAILED"
+    };
+  }
+}

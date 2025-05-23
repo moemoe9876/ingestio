@@ -4,18 +4,18 @@ import { checkUserQuotaAction, incrementPagesProcessedAction } from "@/actions/d
 import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
 import { getVertexStructuredModel, VERTEX_MODELS } from "@/lib/ai/vertex-client";
 import { getPostHogServerClient, trackServerEvent } from "@/lib/analytics/server";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { mergeSegmentResults, segmentDocument, shouldSegmentDocument } from "@/lib/preprocessing/document-segmentation";
 import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
 import {
-  CLASSIFICATION_SYSTEM_INSTRUCTIONS,
-  ClassificationResponse,
-  ClassificationResponseSchema,
-  DocumentType,
-  enhancePromptWithClassification,
-  getClassificationPrompt,
-  getDefaultPromptForType
+    CLASSIFICATION_SYSTEM_INSTRUCTIONS,
+    ClassificationResponse,
+    ClassificationResponseSchema,
+    DocumentType,
+    enhancePromptWithClassification,
+    getClassificationPrompt,
+    getDefaultPromptForType
 } from "@/prompts/classification";
 import { enhancePrompt, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";

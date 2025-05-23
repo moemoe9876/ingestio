@@ -14,7 +14,7 @@ vi.mock("@/actions/db/user-usage-actions", () => ({
   incrementPagesProcessedAction: vi.fn() // Mock this too, likely needed later
 }));
 
-vi.mock("@/lib/auth-utils", () => ({
+vi.mock("@/lib/auth/utils", () => ({
   getCurrentUser: vi.fn()
 }));
 
@@ -158,7 +158,7 @@ vi.mock("@/actions/ai/extraction-actions", async () => {
 import { extractDocumentDataAction } from "@/actions/ai/extraction-actions";
 import { checkUserQuotaAction } from "@/actions/db/user-usage-actions";
 import { getUserSubscriptionDataKVAction } from "@/actions/stripe/sync-actions";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 // We don't import checkRateLimit anymore
 // import { checkRateLimit } from "@/lib/rate-limiting/limiter"; 
 

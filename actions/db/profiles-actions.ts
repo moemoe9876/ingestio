@@ -8,13 +8,13 @@ Contains server actions related to profiles in the DB.
 
 import { db } from "@/db/db"
 import {
-  InsertProfile,
-  membershipEnum,
-  profilesTable,
-  SelectProfile
+    InsertProfile,
+    membershipEnum,
+    profilesTable,
+    SelectProfile
 } from "@/db/schema/profiles-schema"
 import { trackServerEvent } from "@/lib/analytics/server"
-import { getCurrentUser } from "@/lib/auth-utils"
+import { getCurrentUser } from "@/lib/auth/utils"
 import { ActionState } from "@/types/server-action-types"
 import { eq } from "drizzle-orm"
 

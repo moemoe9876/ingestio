@@ -2,11 +2,11 @@
 
 import { db } from "@/db/db"
 import {
-  documentsTable,
-  extractionJobsTable
+    documentsTable,
+    extractionJobsTable
 } from "@/db/schema"
 import { trackServerEvent } from "@/lib/analytics/server"
-import { getCurrentUser } from "@/lib/auth-utils"
+import { getCurrentUser } from "@/lib/auth/utils"
 import { ActionState } from "@/types"
 import { and, count, desc, eq, gte, lte, sql } from "drizzle-orm"
 import { getProfileByUserIdAction } from "./profiles-actions"

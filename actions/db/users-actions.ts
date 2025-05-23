@@ -3,7 +3,7 @@
 import { db } from "@/db/db"
 import { InsertUser, SelectUser, usersTable } from "@/db/schema/users-schema"
 import { trackServerEvent } from "@/lib/analytics/server"
-import { getCurrentUser } from "@/lib/auth-utils"
+import { getCurrentUser } from "@/lib/auth/utils"
 import { ActionState } from "@/types/server-action-types"
 import { eq } from "drizzle-orm"
 

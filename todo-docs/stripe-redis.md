@@ -264,7 +264,7 @@ The "Sane Stripe" approach combats synchronization issues between Stripe and the
         ```typescript
         // Example Action: actions/stripe/sync-actions.ts
         "use server";
-        import { getCurrentUser } from "@/lib/auth-utils";
+        import { getCurrentUser } from "@/lib/auth/utils";
         import { redis } from "@/lib/redis";
         import { syncStripeDataToKV } from "@/lib/stripe/sync";
         import { ActionState } from "@/types";

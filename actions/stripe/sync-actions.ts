@@ -1,7 +1,7 @@
 "use server";
 
 import { getProfileByUserIdAction } from "@/actions/db/profiles-actions";
-import { getCurrentUser } from "@/lib/auth-utils";
+import { getCurrentUser } from "@/lib/auth/utils";
 import { redis } from "@/lib/redis/client";
 import { syncStripeDataToKV } from "@/lib/stripe/sync";
 import { ActionState } from "@/types";

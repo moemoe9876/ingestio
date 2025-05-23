@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Mock auth utility
-vi.mock('@/lib/auth-utils', () => ({
+vi.mock('@/lib/auth/utils', () => ({
   getCurrentUser: vi.fn()
 }));
 
@@ -97,7 +97,7 @@ vi.mock('@/lib/analytics/server', () => ({
 
 // Import after mocks are set up
 import { deleteDocumentAction, fetchDocumentForReviewAction } from '@/actions/db/documents';
-import { getCurrentUser } from '@/lib/auth-utils';
+import { getCurrentUser } from '@/lib/auth/utils';
 
 describe('Document Actions', () => {
   const mockUserId = 'user_123';
