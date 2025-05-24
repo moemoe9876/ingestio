@@ -24,6 +24,7 @@ export const documentStatusEnum = pgEnum("document_status", [
   "processing",
   "completed",
   "failed",
+  "confirmed",
 ]);
 
 // Enum for Extraction Job Status (Likely exists elsewhere, add if needed)
@@ -34,3 +35,21 @@ export const documentStatusEnum = pgEnum("document_status", [
 
 // Enum for Export Format (Likely exists elsewhere)
 // export const exportFormatEnum = pgEnum("export_format", ["json", "csv", "excel"]); 
+
+// --- New Enums for Export Functionality ---
+export const exportStatusEnum = pgEnum("export_status_enum", [
+  "processing",
+  "completed",
+  "failed",
+]);
+
+export const exportFileFormatEnum = pgEnum("export_file_format_enum", [
+  "json",
+  "csv",
+  "excel",
+]);
+
+export const exportTypeEnum = pgEnum("export_type_enum", [
+  "normal",      // Each document is a single row (for CSV/Excel)
+  "multi_row",   // An array field within documents is expanded into multiple rows
+]); 

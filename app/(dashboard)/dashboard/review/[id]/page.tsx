@@ -1,5 +1,6 @@
 "use client";
 
+import { exportDocumentsAction } from "@/actions/batch/batchActions";
 import { fetchDocumentForReviewAction, updateExtractedDataAction } from "@/actions/db/documents";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -16,38 +17,24 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+  DialogTrigger
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/use-toast";
 import { DataVisualizer } from "@/components/utilities/DataVisualizer";
 import DocumentViewer from "@/components/utilities/DocumentViewer";
+import { detectArrayFields, ExportOptions, ExportOptionsModal } from "@/components/utilities/ExportOptionsModal";
 import {
   AlertCircle,
-  Check,
   ChevronLeft,
   ChevronRight,
   Download,
-  Edit,
-  Eye,
   Loader2,
   RotateCw,
   Trash2,
   ZoomIn,
-  ZoomOut,
+  ZoomOut
 } from "lucide-react";
 import * as React from "react";
 import { useEffect, useState, useTransition } from "react";
@@ -101,6 +88,14 @@ export default function ReviewPage({ params }: PageProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [processingStatus, setProcessingStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
+  const [documentStatus, setDocumentStatus] = useState<string | null>(null);
+  const [batchDocumentIds, setBatchDocumentIds] = useState<string[]>([]);
+  const [currentDocumentIndex, setCurrentDocumentIndex] = useState(-1);
+
+  // --- New states for export functionality ---
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [availableArrayFields, setAvailableArrayFields] = useState<string[]>([]);
 
   // Listen for sidebar toggle events
   useEffect(() => {
@@ -126,7 +121,11 @@ export default function ReviewPage({ params }: PageProps) {
         if (!result.isSuccess || !result.data) throw new Error(result.message || "Failed to fetch document data");
         const { document, signedUrl, extractedData: docData } = result.data;
         if (!docData) throw new Error("No extracted data found");
-        setExtractedData(docData.data || docData);
+        
+        const currentExtractedData = docData.data || docData;
+        setExtractedData(currentExtractedData);
+        setAvailableArrayFields(detectArrayFields(currentExtractedData)); // Detect array fields
+
         setExtractionMetadata(docData.metadata || {
           timestamp: document.updatedAt?.toISOString() || document.createdAt.toISOString(),
           model: "gemini-2.0-flash-001",
@@ -135,7 +134,21 @@ export default function ReviewPage({ params }: PageProps) {
         });
         setFileName(document.originalFilename);
         setPdfUrl(signedUrl);
-        setOriginalData(docData.data || docData);
+        setOriginalData(JSON.parse(JSON.stringify(docData.data || docData)));
+        setDocumentStatus(document.status);
+        setConfirmed(document.status === 'confirmed');
+
+        // Fetch document IDs for batch navigation if batchId is present in query params
+        const queryParams = new URLSearchParams(window.location.search);
+        const batchId = queryParams.get('batchId');
+        if (batchId) {
+          // This would ideally be a new server action: fetchDocumentIdsForBatchAction(batchId)
+          // For now, this is a placeholder. In a real scenario, you'd fetch this.
+          // console.log("Would fetch document IDs for batch:", batchId);
+          // Example: setBatchDocumentIds(["doc1", documentId, "doc3"]); 
+          // setCurrentDocumentIndex(1);
+        }
+
       } catch (error) {
         setHasError(true);
         setErrorMessage(error instanceof Error ? error.message : "Failed to fetch document data");
@@ -153,41 +166,63 @@ export default function ReviewPage({ params }: PageProps) {
     }
   }, [extractedData, originalData]);
 
-  const handleConfirm = async () => {
+  const handleSaveChanges = async () => {
+    if (!hasUnsavedChanges) return;
     setProcessingStatus('processing');
     startTransition(async () => {
       try {
         const result = await updateExtractedDataAction(documentId, extractionMetadata?.jobId || documentId, { data: extractedData, metadata: extractionMetadata });
         if (!result.isSuccess) throw new Error(result.message || "Failed to save data");
+        setOriginalData(JSON.parse(JSON.stringify(extractedData)));
+        setHasUnsavedChanges(false);
         setEditMode(false);
-        setConfirmed(true);
         setProcessingStatus('success');
-        toast({ title: "Success", description: "Document data confirmed successfully.", variant: "default" });
+        toast({ title: "Success", description: "Changes saved successfully.", variant: "default" });
       } catch (error) {
         setProcessingStatus('error');
-        toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to confirm document data.", variant: "destructive" });
+        toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to save changes.", variant: "destructive" });
       }
     });
   };
+  
+  const handleMarkConfirmed = async () => {
+    if (confirmed) return;
+    setProcessingStatus('processing');
+    startTransition(async () => {
+      setConfirmed(true);
+      setDocumentStatus('confirmed');
+      setEditMode(false);
+      setProcessingStatus('success');
+      toast({ title: "Success", description: "Document marked as confirmed.", variant: "default" });
+    });
+  };
 
-  const handleExport = () => {
-    if (!extractedData) return;
-    if (exportFormat === "json") {
-      const dataToExport = includeMetadata ? { data: extractedData, metadata: extractionMetadata } : extractedData;
-      const jsonString = JSON.stringify(dataToExport, null, 2);
-      const blob = new Blob([jsonString], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `document_${documentId}.json`);
-      link.style.visibility = "hidden";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      toast({ title: "Export Initiated", description: `Exporting data as ${exportFormat.toUpperCase()}...`, variant: "default" });
+  const handleOpenExportModal = () => {
+    if (extractedData) {
+      setAvailableArrayFields(detectArrayFields(extractedData));
     }
-    setShowExportDialog(false);
+    setShowExportModal(true);
+  };
+
+  const handleExportSubmit = async (options: ExportOptions) => {
+    setIsExporting(true);
+    setShowExportModal(false);
+    try {
+      const result = await exportDocumentsAction([documentId], options);
+      if (result.isSuccess && result.data?.downloadUrl) {
+        toast({
+          title: "Export Successful",
+          description: "Your file is ready for download.",
+          action: <Button variant="outline" size="sm" onClick={() => window.open(result.data?.downloadUrl, '_blank')}>Download</Button>,
+        });
+      } else {
+        throw new Error(result.message || "Failed to export document.");
+      }
+    } catch (error) {
+      toast({ title: "Export Failed", description: error instanceof Error ? error.message : "An unknown error occurred.", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleFieldSelect = (path: string, data: any) => {
@@ -232,7 +267,6 @@ export default function ReviewPage({ params }: PageProps) {
     if (originalData) {
       setExtractedData(JSON.parse(JSON.stringify(originalData)));
       setEditMode(false);
-      setConfirmed(false);
       setSelectedFieldPath(null);
       toast({ title: "Changes Discarded", description: "Original data restored.", variant: "default" });
     }
@@ -242,6 +276,20 @@ export default function ReviewPage({ params }: PageProps) {
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 25, 50));
   const handlePrevPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
   const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
+
+  // TODO: Implement actual previous/next document navigation based on batchDocumentIds
+  const handlePrevDocument = () => {
+    if (currentDocumentIndex > 0) {
+      // router.push(`/dashboard/review/${batchDocumentIds[currentDocumentIndex - 1]}`);
+      toast({title: "Navigate", description: "Previous document (not implemented)"});
+    }
+  };
+  const handleNextDocument = () => {
+    if (currentDocumentIndex < batchDocumentIds.length - 1) {
+      // router.push(`/dashboard/review/${batchDocumentIds[currentDocumentIndex + 1]}`);
+      toast({title: "Navigate", description: "Next document (not implemented)"});
+    }
+  };
 
   if (isLoading) return <div className="flex flex-col items-center justify-center w-full h-full min-h-[500px] space-y-4"><Loader2 className="w-10 h-10 text-primary animate-spin" /><p className="text-lg text-muted-foreground">Loading...</p></div>;
   if (hasError) return <div className="flex flex-col items-center justify-center w-full h-full min-h-[500px] space-y-4"><Alert variant="destructive" className="max-w-lg"><AlertCircle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{errorMessage || "Failed to load data."}</AlertDescription></Alert><Button variant="outline" onClick={() => window.location.reload()}><RotateCw className="mr-2 h-4 w-4" />Retry</Button></div>;
@@ -270,79 +318,84 @@ export default function ReviewPage({ params }: PageProps) {
         
         {/* Document Viewer */}
         <div className="flex-1 bg-gray-200 rounded-lg overflow-auto shadow-inner">
-          {pdfUrl ? <DocumentViewer url={pdfUrl} /> : <div className="flex h-full items-center justify-center text-muted-foreground"><p>No document preview.</p></div>}
-        </div>
-      </div> 
-      
-      {/* Data Extraction Form Pane */}
-      <div className="w-full lg:w-1/2 h-1/2 lg:h-screen bg-white p-4 flex flex-col gap-4 overflow-y-auto">
-        {/* Status Indicator */}
-        {processingStatus !== 'idle' && (
-          <div className={`rounded-lg p-3 flex items-center transition-all duration-300 shadow ${
-            processingStatus === 'success' ? 'bg-green-50 text-green-700' :
-            processingStatus === 'error' ? 'bg-red-50 text-red-700' :
-            'bg-blue-50 text-blue-700' // For processing
-          }`}>
-            {processingStatus === 'success' && <><Check size={16} className="mr-2" /><span className="text-sm font-medium">Data saved!</span></>}
-            {processingStatus === 'error' && <><AlertCircle size={16} className="mr-2" /><span className="text-sm font-medium">Error saving.</span></>}
-            {processingStatus === 'processing' && <><Loader2 size={16} className="mr-2 animate-spin" /><span className="text-sm font-medium">Processing...</span></>}
+          <div className="flex-1 overflow-hidden">
+            {pdfUrl ? (
+              <DocumentViewer 
+                url={pdfUrl} 
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full bg-gray-100 dark:bg-gray-800">
+                <p className="text-muted-foreground">No document to display.</p>
+              </div>
+            )}
           </div>
-        )}
+        </div> 
         
-        {/* Header section for title and file info */}
-        <div className="bg-gray-50 rounded-lg p-4 shadow">
-          <h2 className="text-xl font-semibold text-gray-800 mb-3">Edit file result</h2>
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between"><span className="font-medium text-gray-600">File Name:</span><span className="text-gray-700 truncate ml-2">{fileName || 'N/A'}</span></div>
-            <div className="flex justify-between"><span className="font-medium text-gray-600">Status:</span><span className={`text-gray-700 ${confirmed ? 'text-green-600' : 'text-yellow-600'}`}>{confirmed ? 'Confirmed' : 'Pending'}</span></div>
-            {extractionMetadata && <div className="flex justify-between"><span className="font-medium text-gray-600">Processed by:</span><span className="text-gray-700">{extractionMetadata.model}</span></div>}
+        {/* Right Sidebar for Data Visualization */}
+        <div className={`transition-all duration-300 ease-in-out ${sidebarCollapsed ? "w-0" : "w-full md:w-2/5 lg:w-1/3"} border-l bg-background overflow-y-auto flex flex-col`}>
+          <div className="p-4 border-b flex justify-between items-center">
+            <h2 className="text-lg font-semibold">Extracted Data</h2>
+            <div className="flex items-center space-x-2">
+              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${ documentStatus === 'confirmed' ? 'bg-green-100 text-green-700' : documentStatus === 'failed' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>File Status: {documentStatus || 'Processing'}</span>
+              <Switch id="edit-mode" checked={editMode} onCheckedChange={setEditMode} disabled={confirmed} />
+              <Label htmlFor="edit-mode" className="text-sm">Edit Mode</Label>
+            </div>
           </div>
-        </div>
-        
-        {/* Extracted Data Section with Edit Mode Button */}
-        <div className="bg-gray-50 rounded-lg p-4 shadow flex-1 flex flex-col min-h-[300px]">
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="text-lg font-semibold text-gray-700">Extracted Data</h3>
-            <Button variant={editMode ? "default" : "outline"} size="sm" onClick={() => setEditMode(!editMode)} aria-pressed={editMode} className={editMode ? "bg-indigo-600 hover:bg-indigo-700" : "border-gray-300 text-gray-700"}>
-              {editMode ? <><Eye className="mr-2 h-4 w-4" /> View Mode</> : <><Edit className="mr-2 h-4 w-4" /> Edit Mode</>}
+
+          {/* Action Buttons Toolbar */}
+          <div className="p-2 border-b space-x-1 flex flex-wrap justify-start items-center">
+            <Button onClick={handleSaveChanges} size="sm" disabled={!editMode || !hasUnsavedChanges || isPending || processingStatus === 'processing'} variant="default">
+              {(isPending && processingStatus === 'processing') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save Changes
             </Button>
+            <Button onClick={handleMarkConfirmed} size="sm" variant="default" disabled={editMode || confirmed || isPending || processingStatus === 'processing'}>
+               {(isPending && processingStatus === 'processing') && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Mark as Confirmed
+            </Button>
+            <Button onClick={() => setShowResetDialog(true)} size="sm" variant="outline" disabled={!editMode || !hasUnsavedChanges || isPending || processingStatus === 'processing' || isExporting }>
+               Reset Changes
+            </Button>
+            <Dialog open={showExportDialog} onOpenChange={setShowExportModal}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline" onClick={handleOpenExportModal} disabled={isExporting || isPending}>
+                  {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />} 
+                  Export As...
+                </Button>
+              </DialogTrigger>
+              <ExportOptionsModal
+                isOpen={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                documentIds={[documentId]}
+                availableArrayFields={availableArrayFields}
+                onSubmit={handleExportSubmit}
+                isExporting={isExporting}
+              />
+            </Dialog>
+            {/* Placeholder for Delete button */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="destructive" className="bg-red-600 hover:bg-red-700 text-white" disabled={isExporting || isPending}>
+                      <Trash2 className="mr-2 h-4 w-4" /> Delete
+                  </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                  <AlertDialogHeader>
+                      <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                          This action cannot be undone. This will permanently delete the document and its extracted data.
+                      </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => console.log("Delete document") /* TODO: Implement delete */} className="bg-destructive hover:bg-destructive/90">
+                          Delete Permanently
+                      </AlertDialogAction>
+                  </AlertDialogFooter>
+              </AlertDialogContent>
+          </AlertDialog>
           </div>
-          <div className="flex-1 overflow-y-auto">
+
+          <div className="flex-grow overflow-y-auto p-4">
             <DataVisualizer data={extractedData} onSelect={handleFieldSelect} onEdit={handleFieldEdit} selectedFieldPath={selectedFieldPath} editMode={editMode} className="bg-white rounded shadow-inner" />
           </div>
-        </div>
-        
-        {/* Action Buttons Footer */}
-        <div className="mt-auto pt-4 border-t border-gray-200">
-          <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
-            <div className="flex justify-between items-center">
-              <AlertDialogTrigger asChild>
-                <Button variant="outline" onClick={() => { if (hasUnsavedChanges) setShowResetDialog(true); else handleReset(); }} disabled={isPending || !hasUnsavedChanges} className="border-gray-300 text-gray-700 hover:bg-gray-100">
-                  <Trash2 size={16} className="mr-2" />Reset
-                </Button>
-              </AlertDialogTrigger>
-              <div className="flex gap-2">
-                <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
-                  <DialogTrigger asChild><Button variant="outline" className="border-gray-300 text-gray-700 hover:bg-gray-100"><Download className="mr-2 h-4 w-4" />Export</Button></DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader><DialogTitle>Export Extracted Data</DialogTitle><DialogDescription>Choose format and options.</DialogDescription></DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="export-format" className="text-right">Format</Label><Select value={exportFormat} onValueChange={setExportFormat}><SelectTrigger className="col-span-3"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent><SelectItem value="json">JSON</SelectItem><SelectItem value="csv">CSV</SelectItem><SelectItem value="xlsx">Excel</SelectItem></SelectContent></Select></div>
-                      <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="include-metadata" className="text-right">Include Metadata</Label><div className="col-span-3"><Switch id="include-metadata" checked={includeMetadata} onCheckedChange={setIncludeMetadata} /></div></div>
-                    </div>
-                    <DialogFooter><Button variant="outline" onClick={() => setShowExportDialog(false)}>Cancel</Button><Button onClick={handleExport}><Download className="mr-2 h-4 w-4" />Download</Button></DialogFooter>
-                  </DialogContent>
-                </Dialog>
-                <Button onClick={handleConfirm} disabled={confirmed || isPending || !hasUnsavedChanges} className={`bg-indigo-600 text-white ${(!hasUnsavedChanges && !confirmed) || isPending ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-700'}`}>
-                  {isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Processing...</> : confirmed ? <><Check className="mr-2 h-4 w-4" />Confirmed</> : <><Check className="mr-2 h-4 w-4" />Confirm Changes</>}
-                </Button>
-              </div>
-            </div>
-            <AlertDialogContent>
-              <AlertDialogHeader><AlertDialogTitle>Discard Changes?</AlertDialogTitle><AlertDialogDescription>This will reset data to original values. Action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleReset}>Discard</AlertDialogAction></AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       </div>
     </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { fetchUserBatchListAction } from "@/actions/batch/batchActions";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,12 +30,12 @@ interface BatchListClientProps {
 }
 
 const statusColors = {
-  pending_upload: "secondary",
-  queued: "outline",
-  processing: "default",
-  completed: "success",
-  partially_completed: "warning",
-  failed: "destructive",
+  pending_upload: "bg-gray-100 text-gray-800 border-gray-300",
+  queued: "bg-blue-100 text-blue-800 border-blue-300",
+  processing: "bg-indigo-100 text-indigo-800 border-indigo-300",
+  completed: "bg-green-100 text-green-800 border-green-300",
+  partially_completed: "bg-yellow-100 text-yellow-800 border-yellow-300",
+  failed: "bg-red-100 text-red-800 border-red-300",
 } as const;
 
 const statusLabels = {
@@ -81,7 +80,7 @@ export function BatchListClient({
       nameFilter: nameFilter || undefined,
     }),
     {
-      fallbackData: { isSuccess: true, data: { batches: initialBatches, totalCount: initialTotalCount } },
+      fallbackData: { isSuccess: true, message: "Initial data loaded", data: { batches: initialBatches, totalCount: initialTotalCount } },
       refreshInterval: 5000, // Poll every 5 seconds
       revalidateOnFocus: true,
     }
@@ -133,6 +132,62 @@ export function BatchListClient({
   const batches = data?.isSuccess ? data.data.batches : [];
   const totalCount = data?.isSuccess ? data.data.totalCount : 0;
   const totalPages = Math.ceil(totalCount / 10);
+
+  if (isLoading && !data) { // Show skeleton when initial data is loading and no fallback data is present
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-6 w-1/4" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex-1">
+                <Skeleton className="h-4 w-24 mb-1" />
+                <div className="flex gap-2 mt-1">
+                  <Skeleton className="h-10 flex-1" />
+                  <Skeleton className="h-10 w-10" />
+                </div>
+              </div>
+              <div className="w-full sm:w-48">
+                <Skeleton className="h-4 w-16 mb-1" />
+                <Skeleton className="h-10 w-full mt-1" />
+              </div>
+              <div className="flex items-end">
+                <Skeleton className="h-10 w-32" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {[...Array(7)].map((_, i) => (
+                    <TableHead key={i}><Skeleton className="h-4 w-full" /></TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[...Array(5)].map((_, i) => (
+                  <TableRow key={i}>
+                    {[...Array(7)].map((_, j) => (
+                      <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="flex items-center justify-end space-x-2 py-4">
+              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-8 w-20" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (error || (data && !data.isSuccess)) {
     return (
@@ -200,22 +255,36 @@ export function BatchListClient({
 
       {/* Batches Table */}
       <Card>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="p-6 space-y-4">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
-            </div>
+        <CardContent className="pt-6">
+          {isLoading && batches.length === 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {[...Array(7)].map((_, i) => (
+                    <TableHead key={i}><Skeleton className="h-4 w-full" /></TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[...Array(5)].map((_, i) => (
+                  <TableRow key={i}>
+                    {[...Array(7)].map((_, j) => (
+                      <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           ) : batches.length === 0 ? (
-            <div className="p-8 text-center">
-              <div className="text-muted-foreground mb-4">
-                No batches found{nameFilter && ` matching "${nameFilter}"`}
-              </div>
-              <Button asChild>
+            <div className="text-center py-12">
+              <h3 className="text-xl font-semibold">No Batches Found</h3>
+              <p className="text-muted-foreground mt-2">
+                You haven\'t created any batches yet. Get started by uploading your first batch.
+              </p>
+              <Button asChild className="mt-4">
                 <Link href="/dashboard/batch-upload">
                   <Plus className="h-4 w-4 mr-2" />
-                  Create your first batch
+                  Create New Batch
                 </Link>
               </Button>
             </div>
@@ -223,91 +292,60 @@ export function BatchListClient({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>
-                    <Button 
-                      variant="ghost" 
-                      onClick={() => handleSort("name")}
-                      className="h-auto p-0 font-semibold"
-                    >
-                      Batch Name
-                      {sortBy === "name" && (
-                        sortOrder === "asc" ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />
-                      )}
-                    </Button>
+                  <TableHead onClick={() => handleSort("name")} className="cursor-pointer">
+                    Batch Name / ID
+                    {sortBy === "name" && (sortOrder === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                   </TableHead>
-                  <TableHead>
-                    <Button 
-                      variant="ghost" 
-                      onClick={() => handleSort("status")}
-                      className="h-auto p-0 font-semibold"
-                    >
-                      Status
-                      {sortBy === "status" && (
-                        sortOrder === "asc" ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />
-                      )}
-                    </Button>
+                  <TableHead onClick={() => handleSort("status")} className="cursor-pointer">
+                    Status
+                    {sortBy === "status" && (sortOrder === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                   </TableHead>
                   <TableHead>Progress</TableHead>
-                  <TableHead>Documents</TableHead>
-                  <TableHead>Pages</TableHead>
-                  <TableHead>
-                    <Button 
-                      variant="ghost" 
-                      onClick={() => handleSort("created_at")}
-                      className="h-auto p-0 font-semibold"
-                    >
-                      Created
-                      {sortBy === "created_at" && (
-                        sortOrder === "asc" ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />
-                      )}
-                    </Button>
+                  <TableHead onClick={() => handleSort("documentCount")} className="cursor-pointer">
+                    Documents
+                    {sortBy === "documentCount" && (sortOrder === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                   </TableHead>
-                  <TableHead>Completed</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
+                  <TableHead onClick={() => handleSort("totalPages")} className="cursor-pointer">
+                    Pages
+                    {sortBy === "totalPages" && (sortOrder === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                  </TableHead>
+                  <TableHead onClick={() => handleSort("createdAt")} className="cursor-pointer">
+                    Submitted
+                    {sortBy === "createdAt" && (sortOrder === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                  </TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {batches.map((batch: any) => (
                   <TableRow key={batch.id}>
                     <TableCell>
-                      <Link 
-                        href={`/dashboard/batches/${batch.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {batch.name || batch.id.substring(0, 8) + "..."}
+                      <Link href={`/dashboard/batches/${batch.id}`} className="hover:underline">
+                        {batch.name || `${batch.id.substring(0, 8)}...`}
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={statusColors[batch.status as keyof typeof statusColors]}>
-                        {statusLabels[batch.status as keyof typeof statusLabels]}
+                      <Badge className={statusColors[batch.status as keyof typeof statusColors] || "bg-gray-100 text-gray-800 border-gray-300"}>
+                        {statusLabels[batch.status as keyof typeof statusLabels] || batch.status}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <div className="w-24">
-                              <Progress value={getProgress(batch)} className="h-2" />
-                            </div>
+                            <Progress value={getProgress(batch)} className="w-24" />
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>
-                              Completed: {batch.completedCount || 0}, 
-                              Failed: {batch.failedCount || 0}, 
-                              Pending: {(batch.documentCount || 0) - (batch.completedCount || 0) - (batch.failedCount || 0)}
-                            </p>
+                            <p>Completed: {batch.completedCount || 0}</p>
+                            <p>Failed: {batch.failedCount || 0}</p>
+                            <p>Pending: {(batch.documentCount || 0) - (batch.completedCount || 0) - (batch.failedCount || 0)}</p>
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
                     </TableCell>
-                    <TableCell>{batch.documentCount || 0}</TableCell>
-                    <TableCell>{batch.totalPages || 0}</TableCell>
-                    <TableCell>
-                      {formatRelativeTime(batch.createdAt)}
-                    </TableCell>
-                    <TableCell>
-                      {batch.completedAt ? formatRelativeTime(batch.completedAt) : "-"}
-                    </TableCell>
+                    <TableCell>{batch.documentCount}</TableCell>
+                    <TableCell>{batch.totalPages}</TableCell>
+                    <TableCell>{formatRelativeTime(batch.createdAt)}</TableCell>
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -318,32 +356,21 @@ export function BatchListClient({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem asChild>
                             <Link href={`/dashboard/batches/${batch.id}`}>
-                              <Eye className="h-4 w-4 mr-2" />
+                              <Eye className="mr-2 h-4 w-4" />
                               View Details
                             </Link>
                           </DropdownMenuItem>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Batch
-                              </DropdownMenuItem>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Batch</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Are you sure you want to delete this batch? This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction variant="destructive">
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              // Placeholder for delete action
+                              console.log("Delete batch", batch.id);
+                              // Consider adding a confirmation dialog here
+                            }}
+                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete Batch
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -352,35 +379,31 @@ export function BatchListClient({
               </TableBody>
             </Table>
           )}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-end space-x-2 py-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(page - 1)}
+                disabled={page <= 1}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePageChange(page + 1)}
+                disabled={page >= totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            Showing {Math.min((page - 1) * 10 + 1, totalCount)} to {Math.min(page * 10, totalCount)} of {totalCount} batches
-          </div>
-          <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => handlePageChange(page - 1)}
-            >
-              Previous
-            </Button>
-            <Button 
-              variant="outline" 
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => handlePageChange(page + 1)}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

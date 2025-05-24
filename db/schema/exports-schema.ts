@@ -4,8 +4,10 @@ Defines the schema for exports and related export format enum.
 </ai_context>
 */
 
+import { createUTCDate } from "@/lib/utils/date-utils"
 import { sql } from "drizzle-orm"
-import { pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { jsonb, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { exportFileFormatEnum, exportStatusEnum, exportTypeEnum } from "./enums"
 import { profilesTable } from "./profiles-schema"
 
 export const exportFormatEnum = pgEnum("export_format", ["json", "csv", "excel"])
@@ -20,15 +22,21 @@ export const exportsTable = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => profilesTable.userId, { onDelete: "cascade" }),
-    format: exportFormatEnum("format").notNull(),
-    status: text("status").notNull(),
-    filePath: text("file_path"),
-    documentIds: uuid("document_ids").array().notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at")
+    documentIds: jsonb("document_ids").notNull(),
+    fileName: text("file_name").notNull(),
+    storagePath: text("storage_path").notNull(),
+    fileFormat: exportFileFormatEnum("file_format").notNull(),
+    exportType: exportTypeEnum("export_type").notNull(),
+    arrayFieldToExpand: text("array_field_to_expand"),
+    status: exportStatusEnum("status").default("processing").notNull(),
+    errorMessage: text("error_message"),
+    downloadUrl: text("download_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull()
-      .$onUpdate(() => new Date())
+      .$onUpdate(() => createUTCDate()),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (table) => ({
     statusCheck: sql`check (${table.status} in ('processing', 'completed', 'failed'))`
