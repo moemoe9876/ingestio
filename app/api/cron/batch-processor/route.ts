@@ -11,6 +11,7 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 const CRON_SECRET = process.env.CRON_SECRET;
+const DOCUMENTS_BUCKET = process.env.DOCUMENTS_BUCKET; // Added
 const MAX_BATCHES_PER_RUN = 5; // Number of batches to process in one cron execution
 const MAX_DOCS_PER_BATCH_RUN = 10; // Number of documents to process per batch in one cron execution
 
@@ -19,6 +20,11 @@ export async function GET(request: NextRequest) {
   if (!CRON_SECRET) {
     console.error("CRON_SECRET is not set. Denying access.");
     return new Response('Unauthorized: CRON_SECRET not configured', { status: 401 });
+  }
+  // Added: Validate DOCUMENTS_BUCKET
+  if (!DOCUMENTS_BUCKET) {
+    console.error("DOCUMENTS_BUCKET is not set. Halting execution.");
+    return new Response('Configuration error: DOCUMENTS_BUCKET not configured', { status: 500 });
   }
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${CRON_SECRET}`) {
@@ -132,7 +138,7 @@ export async function GET(request: NextRequest) {
               resolvedPrompt = doc.extractionPrompt;
             } else {
               console.log(`Auto-detecting prompt for doc ${doc.id}, path: ${doc.storagePath}`);
-              const downloadResult = await downloadFromStorage(process.env.DOCUMENTS_BUCKET!, doc.storagePath);
+              const downloadResult = await downloadFromStorage(DOCUMENTS_BUCKET, doc.storagePath);
               
               if (!downloadResult.success || !downloadResult.data) {
                  docProcessingError = downloadResult.error || "Failed to download document for auto-prompt classification.";
