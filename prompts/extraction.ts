@@ -77,14 +77,13 @@ Follow these guidelines:
  * 
  * @param userPrompt - The base prompt (potentially enhanced by classification)
  * @param includeConfidence - Whether to request internal confidence scoring
- * @param includeBoundingBoxes - Whether to request bounding box coordinates for detected objects
  * @param detectedLanguage - Optional detected language hint
  * @returns Fully constructed prompt ready for the AI
  */
 export function enhancePrompt(
   userPrompt: string,
   includeConfidence: boolean = true,
-  includeBoundingBoxes: boolean = true,
+
   detectedLanguage?: string
 ): string {
   console.log("[PROMPT DEBUG] Base user prompt for enhancement:", userPrompt);
@@ -104,12 +103,8 @@ export function enhancePrompt(
   // 3. Append the (potentially classification-enhanced) User Prompt
   finalPromptParts.push(userPrompt.trim());
 
-  // 4. Add Bounding Box Instruction if requested
-  if (includeBoundingBoxes) {
-    finalPromptParts.push("IMPORTANT: For any data points corresponding to identifiable visual objects or regions in the document, you MUST also provide their bounding box coordinates. The bounding boxes should be specified as 'box_2d': [ymin, xmin, ymax, xmax], where coordinates are normalized to 0-1000 relative to the image dimensions. Ensure this 'box_2d' field is included alongside the relevant extracted data within the JSON structure.");
-  }
 
-  // 5. Add Internal AI Guidance based on flags
+  // 4. Add Internal AI Guidance based on flags
   let internalGuidance = [];
   if (includeConfidence) {
     internalGuidance.push("- Internally, assign a confidence score (0.0-1.0) to each extracted value.");

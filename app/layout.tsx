@@ -10,6 +10,7 @@ import { TailwindIndicator } from "@/components/utilities/tailwind-indicator"
 import { UserInitializer } from "@/components/utilities/user-initializer"
 import { cn } from "@/lib/utils"
 import { ClerkProvider } from "@clerk/nextjs"
+import { StagewiseToolbar } from '@stagewise/toolbar-next'
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import Script from "next/script"
@@ -29,6 +30,10 @@ export default async function RootLayout({
 }) {
   // We'll handle user initialization in client components instead
   // to avoid auth() detection issues
+
+  const stagewiseConfig = {
+    plugins: []
+  };
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -73,6 +78,7 @@ export default async function RootLayout({
             {children}
 
             <TailwindIndicator />
+            {process.env.NODE_ENV === 'development' && <StagewiseToolbar config={stagewiseConfig} />}
           </PostHogProvider>
         </ClerkProvider>
         <Toaster />

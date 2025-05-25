@@ -130,7 +130,6 @@ export default function UploadPage() {
               documentId: uploadResult.data.id,
               extractionPrompt: extractionPrompt,
               includeConfidence: false,
-              includeBoundingBoxes: true,
               useSegmentation: false,
               segmentationThreshold: 0.5,
               maxPagesPerSegment: 10,
@@ -138,6 +137,7 @@ export default function UploadPage() {
             });
             
             if (!extractionResult.isSuccess) {
+              console.error("Extraction failed. Full result:", extractionResult);
               throw new Error(extractionResult.message || "Failed to extract data");
             }
             

@@ -16,7 +16,6 @@ import { useEffect, useState } from "react";
 
 interface ExtractionOptions {
   includeConfidence: boolean;
-  includeBoundingBoxes: boolean;
   detectDocumentType: boolean;
   temperature: number;
 }
@@ -29,7 +28,7 @@ export function PromptInput({ onSubmit }: PromptInputProps) {
   const [prompt, setPrompt] = useState("");
   const [options, setOptions] = useState<ExtractionOptions>({
     includeConfidence: false,
-    includeBoundingBoxes: true,
+
     detectDocumentType: true,
     temperature: 0.1
   });
@@ -82,20 +81,6 @@ export function PromptInput({ onSubmit }: PromptInputProps) {
                     id="confidence" 
                     checked={options.includeConfidence}
                     onCheckedChange={(checked) => updateOption("includeConfidence", checked)}
-                  />
-                </div>
-                
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="positions">Include Position Data</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Add location bounding boxes for each field
-                    </p>
-                  </div>
-                  <Switch 
-                    id="boundingBoxes" 
-                    checked={options.includeBoundingBoxes}
-                    onCheckedChange={(checked) => updateOption("includeBoundingBoxes", checked)}
                   />
                 </div>
                 

@@ -181,7 +181,6 @@ export async function GET(request: NextRequest) {
               batchId: batch.id, // Pass batchId so extraction job can be linked
               // Provide default values for other schema fields as the action expects them
               includeConfidence:false, 
-              includeBoundingBoxes: false, 
               useSegmentation: false, 
               segmentationThreshold: 10, 
               maxPagesPerSegment: 10, 

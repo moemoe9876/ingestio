@@ -668,7 +668,7 @@ export function DataVisualizer({
         </Tabs>
       </div>
       
-      <CardContent className="p-0 flex-1 overflow-y-auto max-h-[calc(100vh-300px)] bg-background">
+      <CardContent className="p-0 flex-1 overflow-y-auto bg-background">
         {data ? (
           <>
             {viewMode === "tree" && renderTreeView()}

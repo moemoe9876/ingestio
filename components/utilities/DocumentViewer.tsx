@@ -1,28 +1,23 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { HighlightRect } from "@/types/ui/highlighting"; // Import shared types
 import { MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import PdfViewerUrl from "./PdfViewerUrl";
 
-// Remove local HighlightRect definition
-// interface HighlightRect {
-//   pageNumber: number;
-//   boundingBox: [number, number, number, number]; // [x1, y1, x2, y2] as percentages
-//   color?: string;
-//   id: string;
-// }
-
 interface DocumentViewerProps {
   url: string;
-  highlights?: HighlightRect[]; // Use imported HighlightRect
-  onPositionClick?: (pageNumber: number, position: [number, number]) => void; // Note: This position seems to be pixel-based, not BoundingBox
+  onPositionClick?: (pageNumber: number, position: [number, number]) => void;
+}
+
+// Define the interface for the PdfViewerUrl handle
+export interface PdfViewerHandle {
+  resetView: () => void;
+  // Add other methods or properties if PdfViewerUrl exposes more
 }
 
 export default function DocumentViewer({ 
   url, 
-  highlights = [], 
   onPositionClick
 }: DocumentViewerProps) {
   const [documentType, setDocumentType] = useState<"pdf" | "image" | "unknown">("unknown");
@@ -34,6 +29,8 @@ export default function DocumentViewer({
   const [dragMode, setDragMode] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  // Reference to PdfViewerUrl component
+  const pdfViewerRef = useRef<PdfViewerHandle | null>(null);
 
   useEffect(() => {
     // Check document type based on extension
@@ -79,25 +76,29 @@ export default function DocumentViewer({
   };
 
   const handleResetView = () => {
+    // Reset local state
     setZoom(100);
     setPosition({ x: 0, y: 0 });
+    
+    // Reset PdfViewerUrl state if available
+    if (pdfViewerRef.current && pdfViewerRef.current.resetView) {
+      pdfViewerRef.current.resetView();
+    }
   };
 
   // Handle mouse down for dragging
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Don't initiate drag if in position selection mode
-    if (onPositionClick && !dragMode) return;
+    // Only initiate drag if in dragMode.
+    if (!dragMode) return;
     
     setIsDragging(true);
     setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
-    
-    // Prevent default behavior when dragging
     e.preventDefault();
   };
 
   // Handle mouse move for dragging
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) {
+    if (isDragging && dragMode) {
       setPosition({
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y
@@ -117,7 +118,8 @@ export default function DocumentViewer({
 
   // Handle click on image with position calculation
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    if (!onPositionClick || dragMode) return;
+    // Only trigger onPositionClick if NOT in dragMode and onPositionClick is provided
+    if (dragMode || !onPositionClick) return;
     
     const imgElement = e.currentTarget;
     const rect = imgElement.getBoundingClientRect();
@@ -145,7 +147,8 @@ export default function DocumentViewer({
     };
     
     const handleGlobalMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
+      // Also check dragMode here to ensure global mouse move respects the mode
+      if (isDragging && dragMode) { 
         setPosition({
           x: e.clientX - dragStart.x,
           y: e.clientY - dragStart.y
@@ -160,7 +163,7 @@ export default function DocumentViewer({
       window.removeEventListener('mouseup', handleGlobalMouseUp);
       window.removeEventListener('mousemove', handleGlobalMouseMove);
     };
-  }, [isDragging, dragStart]);
+  }, [isDragging, dragStart, dragMode]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-full">Loading document...</div>;
@@ -169,7 +172,7 @@ export default function DocumentViewer({
   if (documentType === "pdf") {
     return (
       <div className="flex flex-col h-full w-full box-border">
-        <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center justify-between gap-2 mb-2 p-2 bg-gray-50 rounded-md shadow-sm">
           <Button 
             variant={dragMode ? "default" : "outline"} 
             size="sm" 
@@ -192,21 +195,24 @@ export default function DocumentViewer({
             </Button>
           </div>
         </div>
-        <PdfViewerUrl 
-          url={url} 
-          highlights={highlights}
-          onPositionClick={dragMode ? undefined : onPositionClick}
-          zoomLevel={zoom}
-          onZoomChange={setZoom}
-          className="w-full h-full box-border"
-          dragMode={dragMode}
-        />
+        {/* New container for PDF with grey background and padding */}
+        <div className="flex-1 bg-gray-100 p-4 rounded-md shadow-inner overflow-auto">
+          <PdfViewerUrl 
+            ref={pdfViewerRef}
+            url={url} 
+            onPositionClick={dragMode ? undefined : onPositionClick}
+            zoomLevel={zoom}
+            onZoomChange={setZoom}
+            className="w-full h-full box-border" 
+            dragMode={dragMode}
+          />
+        </div>
       </div>
     );
   } else if (documentType === "image") {
     return (
       <div className="flex flex-col h-full w-full box-border">
-        <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center justify-between gap-2 mb-2 p-2 bg-gray-50 rounded-md shadow-sm">
           <Button 
             variant={dragMode ? "default" : "outline"} 
             size="sm" 
@@ -230,15 +236,16 @@ export default function DocumentViewer({
           </div>
         </div>
         
+        {/* Modified container for Image with grey background and padding */}
         <div 
           ref={containerRef}
-          className="flex-1 overflow-y-auto overflow-x-hidden relative h-full w-full box-border"
+          className="flex-1 overflow-auto relative h-full w-full box-border bg-gray-100 p-4 rounded-md shadow-inner" 
           style={{ 
             cursor: isDragging ? 'grabbing' : (dragMode ? 'grab' : 'default')
           }}
         >
           <div 
-            className="relative inline-block"
+            className="relative inline-block" 
             style={{ 
               transform: `scale(${zoom / 100})`,
               transformOrigin: 'top left',
@@ -257,28 +264,6 @@ export default function DocumentViewer({
               onClick={!dragMode && onPositionClick ? handleImageClick : undefined}
               draggable={false}
             />
-            
-            {/* Render highlights on top of the image */}
-            {highlights.map((highlight) => {
-              if (highlight.pageNumber !== 1) return null; // Skip highlights not on page 1 (images only have 1 page)
-              
-              const [x1, y1, x2, y2] = highlight.boundingBox;
-              
-              return (
-                <div
-                  key={highlight.id}
-                  className="absolute border-2 pointer-events-none"
-                  style={{
-                    left: `${x1}%`,
-                    top: `${y1}%`,
-                    width: `${x2 - x1}%`,
-                    height: `${y2 - y1}%`,
-                    borderColor: highlight.color || '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)'
-                  }}
-                />
-              );
-            })}
           </div>
         </div>
       </div>

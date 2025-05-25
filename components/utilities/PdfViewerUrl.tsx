@@ -3,7 +3,7 @@
 import { useResizeObserver } from "@wojtekmaj/react-hooks";
 import { debounce } from "lodash";
 import { AlertCircle } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/esm/Page/AnnotationLayer.css";
 import "react-pdf/dist/esm/Page/TextLayer.css";
@@ -11,7 +11,7 @@ import "react-pdf/dist/esm/Page/TextLayer.css";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { PDFDocumentProxy } from "pdfjs-dist";
-import { PdfHighlightLayer } from "./PdfHighlightLayer";
+import type { PdfViewerHandle } from "./DocumentViewer";
 
 // Recommended configuration as per react-pdf docs
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -24,44 +24,27 @@ const options = {
   standardFontDataUrl: "/standard_fonts/",
 };
 
-interface FieldLocation {
-  page: number;
-  coordinates?: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-}
-
-interface HighlightRect {
-  pageNumber: number;
-  boundingBox: [number, number, number, number]; // [x1, y1, x2, y2] as percentages
-  color?: string;
-  id: string;
-}
-
 interface PdfViewerUrlProps {
   url: string;
   zoomLevel?: number;
   onZoomChange?: (zoom: number) => void;
-  highlightedField?: FieldLocation;
-  highlights?: HighlightRect[];
   onPositionClick?: (pageNumber: number, position: [number, number]) => void;
   className?: string;
   dragMode?: boolean;
 }
 
-export default function PdfViewerUrl({ 
+// Export a forwardRef version of PdfViewerUrl
+const PdfViewerUrl = forwardRef<
+  PdfViewerHandle,
+  PdfViewerUrlProps
+>(({ 
   url, 
   zoomLevel = 100,
   onZoomChange,
-  highlightedField,
-  highlights = [],
   onPositionClick,
   className,
-  dragMode = false
-}: PdfViewerUrlProps) {
+  dragMode = false,
+}, ref) => {
   const [numPages, setNumPages] = useState<number>();
   const [containerRef, setContainerRef] = useState<HTMLElement | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>();
@@ -159,25 +142,28 @@ export default function PdfViewerUrl({
   };
 
   const handleResetView = () => {
+    // Only reset internal state
     updateZoom(100);
     setPosition({ x: 0, y: 0 });
   };
 
   // Handle mouse down for dragging
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Don't initiate drag if in position selection mode and not in drag mode
-    if (onPositionClick && !dragMode) return;
+    // If the dragMode prop (from parent DocumentViewer) is false, do not initiate internal drag.
+    if (!dragMode) {
+      return; // Clicks in selection mode are handled by onPositionClick on PdfViewerUrl or handleImageClick on DocumentViewer
+    }
     
+    // If dragMode prop is true, proceed with PdfViewerUrl's internal drag.
     setIsDragging(true);
     setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
-    
-    // Prevent default behavior when dragging
     e.preventDefault();
   };
 
   // Handle mouse move for dragging
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) {
+    // Only move if internal dragging is active AND parent allows dragMode
+    if (isDragging && dragMode) { 
       setPosition({
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y
@@ -225,30 +211,6 @@ export default function PdfViewerUrl({
     });
   };
 
-  // Scroll to highlighted field
-  useEffect(() => {
-    if (highlights.length > 0) {
-      const highlight = highlights[0]; // Get the first highlight
-      if (highlight && highlight.pageNumber) {
-        // Set current page to the highlighted page
-        setCurrentPage(highlight.pageNumber);
-        
-        // Scroll the page into view
-        const pageIndex = highlight.pageNumber - 1;
-        const pageRef = pageRefs[pageIndex];
-        
-        if (pageRef) {
-          // Scroll the page into view with a small delay to prevent rapid re-renders
-          const timer = setTimeout(() => {
-            pageRef.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
-          
-          return () => clearTimeout(timer);
-        }
-      }
-    }
-  }, [highlights, pageRefs]);
-
   // Add click handler for the text layer
   const handleTextLayerClick = (e: React.MouseEvent, pageNumber: number) => {
     if (!containerRef || !onPositionClick || isDragging || dragMode) return;
@@ -277,52 +239,20 @@ export default function PdfViewerUrl({
     onPositionClick(pageNumber, [boundedX, boundedY]);
   };
 
-  // Add global event listeners for dragging
-  useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      setIsDragging(false);
-    };
-    
-    const handleGlobalMouseMove = (e: MouseEvent) => {
-      if (isDragging && zoom > 100) {
-        setPosition({
-          x: e.clientX - dragStart.x,
-          y: e.clientY - dragStart.y
-        });
+  // Expose resetView method via ref
+  useImperativeHandle(ref, () => ({
+    resetView: () => {
+      // Reset zoom and position to initial values
+      updateZoom(100);
+      setPosition({ x: 0, y: 0 });
+      
+      // Reset scroll position of container if available
+      if (containerRef) {
+        containerRef.scrollTop = 0;
+        containerRef.scrollLeft = 0;
       }
-    };
-    
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    window.addEventListener('mousemove', handleGlobalMouseMove);
-    
-    return () => {
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
-      window.removeEventListener('mousemove', handleGlobalMouseMove);
-    };
-  }, [isDragging, dragStart, zoom]);
-
-  // Add wheel event for zooming 
-  useEffect(() => {
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const delta = -Math.sign(e.deltaY) * 10;
-        const newZoom = Math.max(25, Math.min(400, zoom + delta));
-        updateZoom(newZoom);
-      }
-    };
-    
-    containerRef?.addEventListener('wheel', handleWheel, { passive: false });
-    
-    return () => {
-      containerRef?.removeEventListener('wheel', handleWheel);
-    };
-  }, [containerRef, zoom, updateZoom]);
-
-  // Cleanup event listeners for dragging
-  useEffect(() => {
-    // ... existing code ...
-  }, [isDragging, dragStart]);
+    }
+  }));
 
   // Return error UI if there's an error
   if (error) {
@@ -399,14 +329,11 @@ export default function PdfViewerUrl({
                   width={containerWidth ? containerWidth : undefined}
                   onRenderSuccess={(page) => handlePageRenderSuccess(page, index + 1)}
                   className="pdf-page shadow-md"
-                />
-                
-                {/* Highlight layer */}
-                <PdfHighlightLayer
-                  pageNumber={index + 1}
-                  highlights={highlights}
-                  onPositionClick={onPositionClick}
-                  dragMode={dragMode}
+                  onClick={(event) => {
+                    if (!dragMode && onPositionClick) { // only trigger if not in drag mode and handler exists
+                      handleTextLayerClick(event, index + 1);
+                    }
+                  }}
                 />
               </div>
             ))}
@@ -440,7 +367,9 @@ export default function PdfViewerUrl({
       )}
     </div>
   );
-}
+});
+
+export default PdfViewerUrl;
 
 // Error boundary component
 class ErrorBoundary extends React.Component<

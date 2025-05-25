@@ -9,13 +9,13 @@ import { mergeSegmentResults, segmentDocument, shouldSegmentDocument } from "@/l
 import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limiting/limiter";
 import { createServerClient } from "@/lib/supabase/server";
 import {
-    CLASSIFICATION_SYSTEM_INSTRUCTIONS,
-    ClassificationResponse,
-    ClassificationResponseSchema,
-    DocumentType,
-    enhancePromptWithClassification,
-    getClassificationPrompt,
-    getDefaultPromptForType
+  CLASSIFICATION_SYSTEM_INSTRUCTIONS,
+  ClassificationResponse,
+  ClassificationResponseSchema,
+  DocumentType,
+  enhancePromptWithClassification,
+  getClassificationPrompt,
+  getDefaultPromptForType
 } from "@/prompts/classification";
 import { enhancePrompt, SYSTEM_INSTRUCTIONS } from "@/prompts/extraction";
 import { ActionState } from "@/types/server-action-types";
@@ -38,7 +38,6 @@ const extractDocumentSchema = z.object({
   useSegmentation: z.boolean().optional().default(true), // New option to enable/disable segmentation
   segmentationThreshold: z.number().optional().default(10), // Page threshold to trigger segmentation
   maxPagesPerSegment: z.number().optional().default(10), // Maximum pages per segment
-  includeBoundingBoxes: z.boolean().optional().default(true), // Added for bounding boxes
   skipClassification: z.boolean().optional().default(false), // Option to skip the classification step
 });
 
@@ -227,7 +226,6 @@ export async function extractDocumentDataAction(
       batchId, // Destructure batchId
       extractionPrompt,
       includeConfidence,
-      includeBoundingBoxes,
       useSegmentation,
       segmentationThreshold,
       maxPagesPerSegment,
@@ -319,7 +317,6 @@ export async function extractDocumentDataAction(
         extraction_prompt: extractionPrompt,
         extraction_options: {
           includeConfidence,
-          includeBoundingBoxes,
           useSegmentation,
           segmentationThreshold,
           maxPagesPerSegment,
@@ -366,7 +363,6 @@ export async function extractDocumentDataAction(
           .update({
             extraction_options: {
               includeConfidence,
-              includeBoundingBoxes,
               useSegmentation,
               segmentationThreshold,
               maxPagesPerSegment,
@@ -397,8 +393,8 @@ export async function extractDocumentDataAction(
       finalPrompt = userPromptText || "Extract all relevant information from this document.";
     }
     
-    // Apply standard prompt enhancements (JSON formatting, confidence, positions)
-    const enhancedPrompt = enhancePrompt(finalPrompt, includeConfidence, includeBoundingBoxes);
+    // Apply standard prompt enhancements (JSON formatting, confidence)
+    const enhancedPrompt = enhancePrompt(finalPrompt, includeConfidence); // Always pass false for includeBoundingBoxes
     
     // Prepare system instructions
     const contextualSystemInstructions = `${SYSTEM_INSTRUCTIONS}\nAnalyze the following document and extract the requested information.`;
@@ -726,7 +722,6 @@ export async function extractTextAction(
       documentId,
       extractionPrompt: extractionPrompt || "Extract all text content from this document.",
       includeConfidence: false,
-      includeBoundingBoxes: true,
       useSegmentation: false,
       segmentationThreshold: 10,
       maxPagesPerSegment: 10,
@@ -754,7 +749,6 @@ export async function extractInvoiceDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all invoice information including invoice number, date, total amount, vendor details, and line items.",
     includeConfidence: true,
-    includeBoundingBoxes: true,
     useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
@@ -775,7 +769,6 @@ export async function extractResumeDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all resume information including personal details, work experience, education, and skills.",
     includeConfidence: true,
-    includeBoundingBoxes: true,
     useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
@@ -796,7 +789,6 @@ export async function extractReceiptDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all receipt information including merchant name, date, items purchased, and total amount.",
     includeConfidence: true,
-    includeBoundingBoxes: true,
     useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
@@ -817,7 +809,6 @@ export async function extractFormDataAction(
     documentId,
     extractionPrompt: extractionPrompt || "Extract all form fields and their values, including any checkbox or radio button selections.",
     includeConfidence: true,
-    includeBoundingBoxes: true,
     useSegmentation: false,
     segmentationThreshold: 10,
     maxPagesPerSegment: 10,
