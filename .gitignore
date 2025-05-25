@@ -48,8 +48,8 @@ service-account.json
 *-service-account.json
 *-credentials.json
 
-# docs directory - Contains documentation for the project
-/todo-docs//
+# todo docs 
+.todo
 
 # Cursor AI configuration directory - As requested
 /.cursor/

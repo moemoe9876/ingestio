@@ -136,7 +136,7 @@ export default function DashboardPage() {
         <MetricCard
           title="Total Documents"
           value={isLoading ? "..." : metrics?.documentMetrics?.totalDocuments || 0}
-          description="Documents processed"
+          description="Documents uploaded"
           icon={FileText}
           isLoading={isLoading}
         />

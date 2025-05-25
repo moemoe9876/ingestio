@@ -319,7 +319,7 @@ export default function HistoryPage() {
           >
             <AnimatedGradientText
               gradientClasses="bg-gradient-to-r from-violet-500 via-blue-500 to-teal-500"
-              className="text-2xl md:text-3xl font-extrabold tracking-tight"
+              className="rounded-md text-2xl md:text-3xl font-extrabold tracking-tight"
               animationDuration={10}
             >
               Document History
@@ -659,7 +659,7 @@ function DocumentList({
                 <span className="text-xs text-muted-foreground">{docs.length}</span>
               </div>
 
-              <div className="bg-card/50 rounded-lg border border-border/60 overflow-hidden shadow-sm">
+              <div className="bg-card/50 rounded-md border border-border/60 overflow-hidden shadow-sm">
                 {docs.map((doc, index) => (
                   <motion.div
                     key={doc.id} layout="position"
