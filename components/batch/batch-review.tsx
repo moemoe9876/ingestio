@@ -15,7 +15,7 @@ interface FileItem {
 interface BatchReviewProps {
   batchName?: string
   files: FileItem[]
-  promptStrategy: "global" | "per-document" | "auto-detect"
+  promptStrategy: "global" | "per-document" | "auto"
   globalPrompt: string
   perDocumentPrompts: Record<string, string>
 }
@@ -25,6 +25,9 @@ export function BatchReview({ batchName, files, promptStrategy, globalPrompt, pe
   const [showFileList, setShowFileList] = useState(false)
 
   const getFileIcon = (type: string) => {
+    // Handle undefined or missing file type
+    if (!type) return <FileTextIcon className="h-5 w-5 text-muted-foreground" />
+    
     if (type === "application/pdf") return <FileIcon className="h-5 w-5 text-red-500/80" />
     else if (type.startsWith("image/")) return <ImageIcon className="h-5 w-5 text-blue-500/80" />
     else return <FileTextIcon className="h-5 w-5 text-muted-foreground" />
@@ -36,7 +39,7 @@ export function BatchReview({ batchName, files, promptStrategy, globalPrompt, pe
         return "Global Prompt"
       case "per-document":
         return "Per-Document Prompt"
-      case "auto-detect":
+      case "auto":
         return "Auto-Detect & Prompt"
     }
   }
@@ -80,7 +83,7 @@ export function BatchReview({ batchName, files, promptStrategy, globalPrompt, pe
           </div>
 
           {/* Prompt Details */}
-          {promptStrategy !== "auto-detect" && (
+          {promptStrategy !== "auto" && (
             <div className="border rounded-md overflow-hidden">
               <div
                 className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"

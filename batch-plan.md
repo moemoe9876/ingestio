@@ -216,15 +216,248 @@ Step 2 Implementation Summary
       - components/batch/GlobalPromptInput.tsx: Input for global prompt with character count
     - Step Dependencies: None
     - User Instructions: Test switching between prompt strategies and verify validation works for each mode
-  - Step 5: Create Batch Upload Wizard Component
-    - Task: Implement the main wizard component that orchestrates the batch upload flow. Include step navigation, progress tracking, file management, prompt configuration, and submission handling.
-    - Files:
-        - components/batch/BatchUploadWizard.tsx: Main wizard component with state management
-      - components/batch/WizardSteps.tsx: Step definitions and validation logic
-      - components/batch/WizardProgress.tsx: Visual progress indicator
-      - components/batch/BatchSummary.tsx: Summary view before submission
-    - Step Dependencies: Steps 3, 4
-    - User Instructions: Navigate through the wizard, upload files, configure prompts, and verify the flow works smoothly
+  
+
+  ⏺ Update Todos
+  ⎿  ☒ Analyze existing PromptConfiguration and identify missing components
+     ☒ Create PromptStrategySelector.tsx component
+     ☒ Create PerDocumentPromptEditor.tsx component
+     ☒ Create GlobalPromptInput.tsx component
+     ☒ Refactor main PromptConfiguration to use new modular components
+
+⏺ Perfect! I've successfully implemented Step 4: Create Prompt Configuration Component. Here's what was accomplished:
+
+  Step 4 Implementation Summary ✅
+
+  Created 3 new modular components:
+
+  1. PromptStrategySelector.tsx - Enhanced radio group for strategy selection with:
+    - Visual icons for each strategy (Globe, Target, Brain)
+    - Detailed descriptions and use cases
+    - Strategy summary display
+  2. PerDocumentPromptEditor.tsx - Advanced per-document prompt editor featuring:
+    - Progress tracking with visual indicators
+    - Bulk copy functionality between documents
+    - AI-powered sample prompt generation
+    - File-specific validation and status tracking
+    - Scrollable interface for many files
+  3. GlobalPromptInput.tsx - Comprehensive global prompt input with:
+    - Character count and validation
+    - Quick-start templates for common document types
+    - Copy/clear/restore functionality
+    - Progress visualization
+    - Writing tips and best practices
+
+  Refactored main component:
+  - PromptConfiguration.tsx - Now uses modular components with:
+    - Clean, maintainable architecture
+    - Enhanced auto-detection explanation
+    - Consistent design patterns
+    - Better user experience
+
+  Key features implemented:
+  - ✅ Three prompt strategies (global, per-document, auto)
+  - ✅ Real-time validation and feedback
+  - ✅ Template generation and sample prompts
+  - ✅ Progress tracking and status indicators
+  - ✅ Bulk operations for efficiency
+  - ✅ Mobile-responsive design
+  - ✅ Accessibility compliance
+
+  The prompt configuration system is now highly modular, feature-rich, and provides an excellent user experience for configuring extraction prompts across different strategies. Each component can be easily tested, maintained, and
+  reused throughout the application.
+
+
++### Step 5: Create Batch Upload Wizard Component
++
++**Task**: Enhance the existing `components/batch/BatchUploadWizard.tsx` to orchestrate the complete multi-step batch upload flow. This includes:
++1.  **Step 1: File Upload & Batch Naming**: Integrate `FileDropzone.tsx` and `FilePreview.tsx` (from Step 3). Allow users to name the batch.
++2.  **Step 2: Prompt Configuration**: Integrate `PromptConfiguration.tsx` (from Step 4).
++3.  **Step 3: Review & Submit**: Display a summary of the batch (name, number of files, prompt strategy, and prompts if applicable) before final submission.
++
++The wizard will manage overall state, step navigation, progress display, and handle the final submission to the `createBatchUploadAction` server action.
++
++**Files**:
++
++1.  **`components/batch/BatchUploadWizard.tsx`** (Enhance Existing)
++    *   **Purpose**: Main stateful component managing the multi-step batch upload process.
++    *   **Props**:
++        *   `initialSubscriptionData: StripeCustomerDataKV` (already exists, used for tier-based limits).
++    *   **State**:
++        *   `currentStep: number` (1, 2, or 3)
++        *   `batchName: string`
++        *   `selectedFiles: File[]` (managed by `FileDropzone` and `FilePreview` callbacks)
++        *   `fileRejections: FileRejection[]` (managed by `FileDropzone` callbacks)
++        *   `promptStrategy: PromptStrategy`
++        *   `globalPrompt: string`
++        *   `perDocPrompts: Record<string, string>` (maps original file name to its prompt)
++        *   `isSubmitting: boolean` (for loading state on submit button)
++        *   `submissionError: string | null`
++    *   **Logic**:
++        *   **Step Navigation**: Functions `handleNextStep` and `handlePreviousStep` to update `currentStep`.
++        *   **Validation**: Implement validation checks before allowing progression to the next step:
++            *   Step 1 to 2: `batchName` must not be empty (optional, can default). `selectedFiles` must not be empty.
++            *   Step 2 to 3:
++                *   If `promptStrategy` is "global", `globalPrompt` must not be empty.
++                *   If `promptStrategy` is "per-document", ensure all `selectedFiles` have a corresponding non-empty prompt in `perDocPrompts`.
++        *   **File Handling**:
++            *   `onFilesAccepted` callback for `FileDropzone`: Updates `selectedFiles`.
++            *   `onFilesRejected` callback for `FileDropzone`: Updates `fileRejections` and shows toasts.
++            *   `onRemoveFile` callback for `FilePreview`: Removes a file from `selectedFiles` or `fileRejections`.
++            *   `onConfirmRemoveAll` callback for `FilePreview`: Clears `selectedFiles` and `fileRejections`.
++        *   **Submission**:
++            *   `handleSubmitBatch` function:
++                *   Sets `isSubmitting` to true.
++                *   Constructs `FormData` including `batchName`, `files`, `promptStrategy`, `globalPrompt` (if applicable), and `perDocPrompts` (JSON stringified, if applicable).
++                *   Calls `createBatchUploadAction` (from `actions/batch/batchActions.ts`).
++                *   Handles success: Shows success toast, redirects to the new batch detail page (e.g., `/dashboard/batches/[batchId]`).
++                *   Handles error: Shows error toast, sets `submissionError`.
++                *   Sets `isSubmitting` to false.
++    *   **Rendering**:
++        *   Uses `WizardNav.tsx` (already exists) to display current step.
++        *   Uses `PlanInfo.tsx` (already exists) to display tier limits.
++        *   Conditionally renders content for each step:
++            *   **Step 1 (Upload Files & Name Batch)**:
++                *   `Input` for `batchName`.
++                *   `FileDropzone` component (from Step 3).
++                *   `FilePreview` component (from Step 3).
++            *   **Step 2 (Configure Prompts)**:
++                *   `PromptConfiguration` component (from Step 4), passing relevant state and setters.
++            *   **Step 3 (Review & Submit)**:
++                *   `BatchReview.tsx` component (new, see below).
++        *   Navigation buttons ("Next", "Previous", "Submit Batch") with appropriate disabled states based on validation and `isSubmitting`.
++
++2.  **`components/batch/WizardNav.tsx`** (Existing - Verify)
++    *   **Purpose**: Visual indicator of the current step in the wizard.
++    *   **Props**: `currentStep: number`.
++    *   **Verification**: Ensure it correctly highlights the active step and completed steps.
++
++3.  **`components/batch/BatchReview.tsx`** (Exisiting Component  Verify)
++    *   **Purpose**: Display a summary of the batch configuration before submission.
++    *   **Props**:
++        *   `batchName?: string`
++        *   `files: FileItem[]`
++        *   `promptStrategy: PromptStrategy | "auto-detect"` (adjust type to include "auto-detect" for display)
++        *   `globalPrompt: string`
++        *   `perDocumentPrompts: Record<string, string>`
++    *   **UI**:
++        *   Uses `Card` components to structure the summary.
++        *   Displays:
++            *   Batch Name (if provided).
++            *   Number of files and total size (use `formatFileSize` from `lib/utils/format-file-size.ts`).
++            *   Selected Prompt Strategy.
++            *   Global prompt content (if "global" strategy).
++            *   A collapsible section (`Collapsible` from shadcn/ui) to show per-document prompts if "per-document" strategy, listing each file and its prompt.
++            *   An informational message if "auto-detect" strategy.
++        *   Read-only display.
++
++**Step Dependencies**:
++- Step 3 (File Upload Components: `FileDropzone`, `FilePreview`).
++- Step 4 (Prompt Configuration Component: `PromptConfiguration`).
++- `types/batch-types.ts` for various types.
++- `actions/batch/batchActions.ts` for `createBatchUploadAction`.
++- `lib/config/subscription-plans.ts` for tier limits.
++- `lib/utils/format-file-size.ts` for displaying file sizes.
++- Shadcn/ui components (`Button`, `Input`, `Card`, `Progress`, `ScrollArea`, `Collapsible`, `RadioGroup`, `Label`, `Textarea`, `toast` from `sonner`).
++- `next/navigation` for `useRouter`.
++- React hooks (`useState`, `useEffect`, `useCallback`, `useTransition`).
++
++**User Instructions**:
++- Navigate through all three steps of the wizard.
++- **Step 1**:
++    - Test naming the batch.
++    - Upload files using drag-and-drop and the browse button.
++    - Verify file previews, removal of individual files, and "Remove All" functionality.
++    - Confirm that file count and size limits based on the user's subscription tier (from `initialSubscriptionData`) are enforced by `FileDropzone`.
++- **Step 2**:
++    - Test all three prompt strategies.
++    - For "Global", ensure the prompt is captured.
++    - For "Per-Document", ensure prompts can be entered for each file and are stored.
++    - For "Auto-Detect", ensure the informational message is shown.
++- **Step 3**:
++    - Verify that the `BatchReview` component accurately displays all configured information (batch name, file count/size, prompt strategy, and specific prompts).
++- **Navigation & Submission**:
++    - Confirm that "Next" buttons are disabled if step validation fails.
++    - Test the "Previous" button functionality.
++    - On the final step, click "Submit Batch" and verify:
++        - Loading state is shown on the button.
++        - A toast notification appears indicating submission.
++        - On success, the user is redirected to the batch detail page (`/dashboard/batches/[batchId]`) and a success toast is shown.
++        - On failure, an error toast is shown, and the user remains on the wizard to correct issues.
++  Step 5 Implementation Summary ✅
+
+  Enhanced BatchUploadWizard.tsx with modular architecture:
+
+  Key Improvements Made:
+
+  1. Integrated New Modular Components:
+  - ✅ FileDropzone - Advanced drag-and-drop file upload with subscription-tier validation
+  - ✅ FilePreview - Rich file preview with status tracking and management
+  - ✅ PromptConfiguration - Complete prompt strategy configuration system
+  - ✅ WizardNav - Visual step progress indicator (verified existing)
+  - ✅ BatchReview - Comprehensive pre-submission review (verified existing)
+
+  2. Enhanced State Management:
+  - ✅ Separated wizard state, file management, and prompt configuration
+  - ✅ Added isSubmitting and submissionError for better UX
+  - ✅ Implemented ValidatedFile tracking for advanced file management
+  - ✅ Added FileConstraints based on subscription tiers
+
+  3. Advanced Validation System:
+  - ✅ Step 1 → 2: Files must be selected (batch name optional)
+  - ✅ Step 2 → 3: Strategy-specific prompt validation:
+    - Global: Non-empty global prompt required
+    - Per-document: All files must have non-empty prompts
+    - Auto: No validation needed (AI handles prompts)
+  - ✅ Real-time validation with user feedback
+
+  4. Enhanced File Handling:
+  - ✅ handleFilesAccepted - Converts to ValidatedFile format
+  - ✅ handleFilesRejected - Manages upload errors
+  - ✅ handleRemoveFile - Individual file removal
+  - ✅ handleRemoveAllFiles - Bulk file clearing with prompt cleanup
+
+  5. Improved Navigation & UX:
+  - ✅ Smart button states based on validation results
+  - ✅ Step indicators and progress tracking
+  - ✅ Loading states during submission
+  - ✅ Error handling with user-friendly messages
+  - ✅ Validation feedback before step transitions
+
+  6. Better Error Handling:
+  - ✅ Submission error display with alerts
+  - ✅ Network error handling and recovery
+  - ✅ Form validation with specific error messages
+  - ✅ Toast notifications for user feedback
+
+  Workflow Verification:
+
+  Step 1 (File Upload & Batch Naming):
+  - File constraints displayed based on subscription tier
+  - Drag-and-drop upload with real-time validation
+  - File preview with status indicators and removal options
+  - Optional batch naming with helpful placeholders
+
+  Step 2 (Prompt Configuration):
+  - Three strategy options with detailed explanations
+  - Strategy-specific UI components load dynamically
+  - Validation prevents progression without required prompts
+
+  Step 3 (Review & Submit):
+  - Comprehensive batch summary with all configurations
+  - Submission with loading states and error handling
+  - Success redirect to batch detail page
+
+  Integration Benefits:
+
+  - Modular Architecture: Each component can be tested and maintained independently
+  - Type Safety: Full TypeScript coverage with proper interfaces
+  - Subscription Integration: Tier-based limits and constraints
+  - User Experience: Smooth wizard flow with clear validation feedback
+  - Error Recovery: Comprehensive error handling at each step
+
+  The enhanced BatchUploadWizard now provides a premium user experience with robust validation, clear step progression, and seamless integration with all the modular components created in previous steps. The wizard is
+  production-ready and follows all the specifications outlined in the plan.
 
   Server Actions & API
 
@@ -379,3 +612,10 @@ Step 2 Implementation Summary
       - docs/batch-deployment.md: Deployment procedures
     - Step Dependencies: All previous steps
     - User Instructions: Follow deployment checklist, verify all environment variables are set, and test in staging before production
+
+
+
+
+
+
+ 

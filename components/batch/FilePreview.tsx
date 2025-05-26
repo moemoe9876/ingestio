@@ -68,6 +68,11 @@ const handleRemove = async () => {
   };
 
   const getFileTypeIcon = () => {
+    // Handle undefined or missing file type
+    if (!file.type) {
+      return <FileText className="h-6 w-6 text-gray-500 flex-shrink-0" />;
+    }
+    
     if (file.type === 'application/pdf') {
       return <FileText className="h-6 w-6 text-red-500 flex-shrink-0" />;
     }
@@ -113,7 +118,10 @@ const handleRemove = async () => {
               <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
                 <span>{formatFileSize(file.size)}</span>
                 <span className="capitalize">
-                  {file.type.replace('application/', '').replace('image/', '')}
+                  {file.type 
+                    ? file.type.replace('application/', '').replace('image/', '')
+                    : 'Unknown'
+                  }
                 </span>
                 {file.lastModified && (
                   <span>

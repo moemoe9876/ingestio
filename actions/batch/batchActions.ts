@@ -19,12 +19,13 @@ import { checkRateLimit, SubscriptionTier, validateTier } from "@/lib/rate-limit
 import { uploadToStorage } from "@/lib/supabase/storage-utils";
 import type { ActionState } from "@/types/server-action-types";
 
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
 const ALLOWED_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 
 // Define a type for the successful data payload
 type CreateBatchUploadSuccessData = {
-  batchId: string;
+  batchId: string; 
 };
 
 // Helper function to process and prepare a single document

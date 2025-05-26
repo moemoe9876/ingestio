@@ -268,6 +268,11 @@ export function FileDropzone({
 
 // Helper component for file type icons
 export function FileTypeIcon({ mimeType, className }: { mimeType: string; className?: string }) {
+  // Handle undefined or missing mime type
+  if (!mimeType) {
+    return <FileText className={cn("text-gray-500", className)} />;
+  }
+  
   if (mimeType === 'application/pdf') {
     return <FileText className={cn("text-red-500", className)} />;
   }

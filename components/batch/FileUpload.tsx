@@ -5,61 +5,28 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import PdfViewer from "@/components/utilities/PdfViewer";
 import { cn } from "@/lib/utils";
-import { File as FileIcon, Upload as UploadIcon, X } from "lucide-react";
-import { useCallback, useState } from "react";
-import { useDropzone } from "react-dropzone";
+import { formatFileSize } from "@/lib/utils/format-file-size"; // Assuming this is correctly imported
+import { File as FileIcon, Upload as UploadIcon, X, AlertCircle } from "lucide-react"; // Added AlertCircle
+import { useCallback, useEffect, useState } from "react";
+import { useDropzone, FileRejection } from "react-dropzone"; // Imported FileRejection
+import { toast } from "sonner"; // Using sonner for feedback
 
 interface FileUploadProps {
-  onFileSelect: (file: File) => void;
+  onFileSelect: (file: File | null) => void;
   onPromptChange?: (prompt: string) => void;
   initialPrompt?: string;
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (
-    Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
-  );
-}
-
 export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [file, setFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [detectedFileType, setDetectedFileType] = useState<string | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [rejectionErrors, setRejectionErrors] = useState<string[]>([]); // State for rejection errors
 
-  const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
-      const file = acceptedFiles[0];
-      setSelectedFile(file);
-      onFileSelect(file);
-      setFile(file);
-      
-      // Simple file type detection based on name/extension
-      const fileName = file.name.toLowerCase();
-      if (fileName.includes('invoice') || fileName.includes('receipt')) {
-        setDetectedFileType('invoice');
-        suggestPrompt('invoice');
-      } else if (fileName.includes('resume') || fileName.includes('cv')) {
-        setDetectedFileType('resume');
-        suggestPrompt('resume');
-      } else if (fileName.includes('form')) {
-        setDetectedFileType('form');
-        suggestPrompt('form');
-      } else {
-        setDetectedFileType(null);
-      }
-    },
-    [onFileSelect]
-  );
-
-  const suggestPrompt = (type: string) => {
+  const suggestPrompt = useCallback((type: string) => {
     let suggestedPrompt = prompt;
-    
-    if (!prompt || prompt === initialPrompt) {
+    if (!prompt || prompt === initialPrompt) { // Only suggest if prompt is empty or initial
       switch (type) {
         case 'invoice':
           suggestedPrompt = "Extract invoice number, date, due date, vendor name, vendor address, line items, subtotal, tax, and total amount.";
@@ -71,15 +38,84 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
           suggestedPrompt = "Extract all form fields with their labels and values.";
           break;
         default:
-          suggestedPrompt = prompt;
+          // No change if type is not recognized or prompt is already custom
+          break;
       }
-      
-      setPrompt(suggestedPrompt);
-      if (onPromptChange) {
-        onPromptChange(suggestedPrompt);
+      if (suggestedPrompt !== prompt) {
+        setPrompt(suggestedPrompt);
+        if (onPromptChange) {
+          onPromptChange(suggestedPrompt);
+        }
       }
     }
-  };
+  }, [prompt, initialPrompt, onPromptChange, setPrompt]); // Dependencies for suggestPrompt
+
+  const onDrop = useCallback(
+    (acceptedFiles: File[], fileRejections: FileRejection[]) => {
+      setRejectionErrors([]); // Clear previous rejection errors
+
+      if (fileRejections.length > 0) {
+        const currentRejectionErrors: string[] = [];
+        fileRejections.forEach(({ file, errors }) => {
+          errors.forEach(error => {
+            let message = `${file.name}: `;
+            if (error.code === 'file-too-large') {
+              message += `File is too large (max 100MB).`;
+            } else if (error.code === 'file-invalid-type') {
+              message += `Invalid file type.`;
+            } else {
+              message += error.message;
+            }
+            currentRejectionErrors.push(message);
+            toast.error("File Rejected", { description: message });
+          });
+        });
+        setRejectionErrors(currentRejectionErrors);
+      }
+
+      if (acceptedFiles.length > 0) {
+        const file = acceptedFiles[0];
+        setSelectedFile(file);
+        onFileSelect(file);
+        setDetectedFileType(null); // Reset detected type for new file
+
+        const fileName = file.name.toLowerCase();
+        if (fileName.includes('invoice') || fileName.includes('receipt')) {
+          setDetectedFileType('invoice');
+          suggestPrompt('invoice');
+        } else if (fileName.includes('resume') || fileName.includes('cv')) {
+          setDetectedFileType('resume');
+          suggestPrompt('resume');
+        } else if (fileName.includes('form')) {
+          setDetectedFileType('form');
+          suggestPrompt('form');
+        }
+      } else if (fileRejections.length === 0 && selectedFile) {
+        // If no files accepted and no new rejections, but a file was previously selected,
+        // it means the user might have tried to drop a file while one was already selected (multiple: false)
+        // or an unhandled dropzone internal state. We can optionally clear the selection or notify.
+        // For now, we'll assume react-dropzone handles this by not calling onDrop if multiple:false and file exists.
+      }
+    },
+    [onFileSelect, suggestPrompt, selectedFile] // suggestPrompt is now memoized
+  );
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    if (selectedFile && selectedFile.type.startsWith("image/")) {
+      objectUrl = URL.createObjectURL(selectedFile);
+      setImagePreviewUrl(objectUrl);
+    } else {
+      setImagePreviewUrl(null); // Clear if not an image or no file
+    }
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        setImagePreviewUrl(null);
+      }
+    };
+  }, [selectedFile]);
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newPrompt = e.target.value;
@@ -99,6 +135,13 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
     maxSize: 100 * 1024 * 1024, // 100MB
     multiple: false,
   });
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setDetectedFileType(null);
+    onFileSelect(null);
+    setRejectionErrors([]); // Clear errors when file is removed
+  };
 
   return (
     <div className="w-full space-y-6">
@@ -166,11 +209,11 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
                 </p>
               </div>
               
-              {file && file.type === "application/pdf" && <PdfViewer file={file} />}
-              {file && file.type.startsWith("image/") && (
+              {selectedFile && selectedFile.type === "application/pdf" && <PdfViewer file={selectedFile} />}
+              {selectedFile && selectedFile.type.startsWith("image/") && imagePreviewUrl && (
                 <div className="ml-2 border rounded overflow-hidden">
                   <img 
-                    src={URL.createObjectURL(file)} 
+                    src={imagePreviewUrl} 
                     alt="Preview" 
                     className="max-h-20 max-w-20 object-contain"
                   />
@@ -180,16 +223,27 @@ export function FileUpload({ onFileSelect, onPromptChange, initialPrompt = "" }:
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setSelectedFile(null)}
+                onClick={handleRemoveFile}
                 className="flex-shrink-0 ml-2 text-muted-foreground hover:text-foreground"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 w-4" />
                 <span className="sr-only">Remove file</span>
               </Button>
             </div>
           </div>
         )}
       </div>
+
+      {rejectionErrors.length > 0 && (
+        <div className="mt-4 space-y-1">
+          {rejectionErrors.map((error, index) => (
+            <div key={index} className="flex items-center text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+              {error}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="extraction-instructions-container space-y-2">
         <Label htmlFor="extraction-prompt" className="text-sm font-medium">Extraction Instructions</Label>
